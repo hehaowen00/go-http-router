@@ -220,5 +220,9 @@ func validateSeq(xs []string) error {
 		set[k] = struct{}{}
 	}
 
+	if len(set) > 32 {
+		return fmt.Errorf("wildcard limit exceeded")
+	}
+
 	return nil
 }

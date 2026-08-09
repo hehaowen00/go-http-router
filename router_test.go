@@ -5,6 +5,8 @@ import (
 	"net/http"
 	"slices"
 	"testing"
+
+	"github.com/hehaowen00/go-inspect"
 )
 
 type dummyHandler struct{}
@@ -92,7 +94,7 @@ func TestRouter(t *testing.T) {
 		"/api/goodbye",
 		"/api/hello/me",
 		"/api/hello/:message",
-		// "/api/hello/:a/:b",
+		"/api/hello/:a/:b",
 		"/api/hello/:message/n",
 		"/api/help",
 	}
@@ -101,6 +103,8 @@ func TestRouter(t *testing.T) {
 	for _, route := range routes {
 		r.GET(route, dummyHandler{})
 	}
+
+	inspect.Inspect(r)
 
 	params := Params{}
 
@@ -115,41 +119,43 @@ func TestRouter(t *testing.T) {
 	// r.Search(http.MethodGet, "/api/../hello", &params)
 }
 
-// func TestRouterGithub(t *testing.T) {
-// 	r := New()
-// 	for _, route := range githubAPI {
-// 		r.Insert(route[0], route[1], dummyHandler{})
-// 		params := map[string]string{}
-// 		h := r.Search(route[0], route[1], params)
-// 		if h == nil {
-// 			t.Log("failed to find", route[0], route[1])
-// 			t.FailNow()
-// 		}
-// 	}
+func TestRouterGithub(t *testing.T) {
+	r := New()
+	params := Params{}
 
-// 	for _, route := range githubAPI {
-// 		params := map[string]string{}
-// 		h := r.Search(route[0], route[1], params)
-// 		if h == nil {
-// 			t.Log("failed to find", route[0], route[1])
-// 			t.FailNow()
-// 		}
-// 	}
-// }
+	for _, route := range githubAPI {
+		r.Add(route[0], route[1], dummyHandler{})
+		h := r.Search(route[0], route[1], &params)
+		if h == nil {
+			inspect.Inspect(r)
+			t.Log("failed to find", route[0], route[1])
+			t.FailNow()
+		}
+	}
 
-// func BenchmarkRouter(b *testing.B) {
-// 	r := New()
-// 	for _, route := range githubAPI {
-// 		r.Insert(route[0], route[1], dummyHandler{})
-// 	}
+	for _, route := range githubAPI {
+		h := r.Search(route[0], route[1], &params)
+		if h == nil {
+			inspect.Inspect(r)
+			t.Log("failed to find", route[0], route[1])
+			t.FailNow()
+		}
+	}
+}
 
-// 	params := map[string]string{}
+func BenchmarkRouter(b *testing.B) {
+	r := New()
+	for _, route := range githubAPI {
+		r.Add(route[0], route[1], dummyHandler{})
+	}
 
-// 	for i := 0; b.Loop(); i++ {
-// 		route := githubAPI[i%len(githubAPI)]
-// 		handler := r.Search(route[0], route[1], params)
-// 		if handler == nil {
-// 			b.Fatalf("route not found: %s %s", route[0], route[1])
-// 		}
-// 	}
-// }
+	params := Params{}
+
+	for i := 0; b.Loop(); i++ {
+		route := githubAPI[i%len(githubAPI)]
+		handler := r.Search(route[0], route[1], &params)
+		if handler == nil {
+			b.Fatalf("route not found: %s %s", route[0], route[1])
+		}
+	}
+}

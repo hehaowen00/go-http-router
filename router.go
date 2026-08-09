@@ -48,6 +48,7 @@ func (r *Router) Search(method string, path string, params *Params) Handler {
 }
 
 func (r *Router) Remove(method string, path string) {
+	panic("unimplemented")
 }
 
 func (r *Router) GET(path string, handler Handler) {

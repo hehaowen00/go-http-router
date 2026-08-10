@@ -42,8 +42,9 @@ func (r *Router) Search(method string, path string, params *Params) Handler {
 
 	h := r.root.search(method, path, params)
 	if h == nil {
-		params = nil
+		params.clear()
 	}
+
 	return h
 }
 

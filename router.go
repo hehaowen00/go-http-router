@@ -2,7 +2,6 @@ package gohttprouter
 
 import (
 	"net/http"
-	"strings"
 )
 
 type Router struct {
@@ -30,15 +29,6 @@ func (r *Router) Add(method string, path string, handler Handler) {
 
 func (r *Router) Search(method string, path string, params *Params) Handler {
 	params.clear()
-
-	if !strings.HasSuffix(path, "/") {
-		path += "/"
-	}
-
-	// path = strings.TrimPrefix(path, "/")
-
-	path = strings.ReplaceAll(path, "//", "/")
-	path = strings.ReplaceAll(path, "//", "/")
 
 	h := r.root.search(method, path, params)
 	if h == nil {

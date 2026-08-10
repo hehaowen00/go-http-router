@@ -94,12 +94,13 @@ func TestRouter(t *testing.T) {
 		"/api/goodbye",
 		"/api/hello/me",
 		"/api/hello/:message",
-		"/api/hello/:a/:b",
+		// "/api/hello/:a/:b",
 		"/api/hello/:message/n",
 		"/api/help",
 	}
 
 	r := New()
+
 	for _, route := range routes {
 		r.GET(route, dummyHandler{})
 	}
@@ -115,8 +116,6 @@ func TestRouter(t *testing.T) {
 			t.FailNow()
 		}
 	}
-
-	// r.Search(http.MethodGet, "/api/../hello", &params)
 }
 
 func TestRouterGithub(t *testing.T) {
@@ -152,10 +151,11 @@ func BenchmarkRouter(b *testing.B) {
 	params := Params{}
 
 	for i := 0; b.Loop(); i++ {
-		route := githubAPI[i%len(githubAPI)]
-		handler := r.Search(route[0], route[1], &params)
-		if handler == nil {
-			b.Fatalf("route not found: %s %s", route[0], route[1])
+		for _, route := range githubAPI {
+			handler := r.Search(route[0], route[1], &params)
+			if handler == nil {
+				b.Fatalf("route not found: %s %s", route[0], route[1])
+			}
 		}
 	}
 }

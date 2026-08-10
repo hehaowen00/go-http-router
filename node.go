@@ -10,12 +10,32 @@ type node struct {
 	prefix   string
 	handlers methodHandler
 	children []*node
-	wildcard map[string]*node
+	wildcard []*wildcard
 	param    string
+}
+
+type wildcard struct {
+	name string
+	node *node
 }
 
 func newNode() *node {
 	return &node{}
+}
+
+func (n *node) getWildcard(name string) int {
+	for i := range n.wildcard {
+		if n.wildcard[i].name == name {
+			return i
+		}
+	}
+
+	n.wildcard = append(n.wildcard, &wildcard{
+		name: name,
+		node: newNode(),
+	})
+
+	return len(n.wildcard) - 1
 }
 
 func (n *node) search(method string, path string, params *Params) Handler {
@@ -42,8 +62,8 @@ func (n *node) search(method string, path string, params *Params) Handler {
 
 	value := path[:idx]
 
-	for k, v := range n.wildcard {
-		params.set(k, value)
+	for _, v := range n.wildcard {
+		params.set(v.name, value)
 		path = path[idx:]
 
 		idx := strings.IndexAny(path, "/")
@@ -52,7 +72,7 @@ func (n *node) search(method string, path string, params *Params) Handler {
 		}
 
 		path = path[idx:]
-		return v.search(method, path, params)
+		return v.node.search(method, path, params)
 	}
 
 	return nil
@@ -69,18 +89,21 @@ func (n *node) insert(method string, pathSeq []string, handler Handler) {
 	if isParam(currentSegment) {
 		name := paramName(currentSegment)
 
-		if n.wildcard == nil {
-			n.wildcard = map[string]*node{}
-		}
+		i := n.getWildcard(name)
+		wildcardNode := n.wildcard[i]
 
-		wildcardNode, ok := n.wildcard[name]
-		if !ok {
-			wildcardNode = newNode()
-			n.wildcard[name] = wildcardNode
-		}
+		// if n.wildcard == nil {
+		// 	n.wildcard = map[string]*node{}
+		// }
+
+		// wildcardNode, ok := n.wildcard[name]
+		// if !ok {
+		// 	wildcardNode = newNode()
+		// 	n.wildcard[name] = wildcardNode
+		// }
 
 		pathSeq = slices.Delete(pathSeq, 0, 1)
-		wildcardNode.insert(method, pathSeq, handler)
+		wildcardNode.node.insert(method, pathSeq, handler)
 		return
 	}
 
@@ -196,10 +219,6 @@ func splitPath(path string) []string {
 	if buf != "" {
 		res = append(res, buf+"/")
 	}
-
-	// if len(res) > 0 {
-	// 	res[0] = strings.TrimPrefix(res[0], "/")
-	// }
 
 	return res
 }

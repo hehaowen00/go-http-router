@@ -41,38 +41,59 @@ func (n *node) getWildcard(name string) int {
 func (n *node) search(method string, path string, params *Params) Handler {
 	path = strings.TrimPrefix(path, n.prefix)
 
-	if len(path) == 0 || (n.handlers.count() > 0 && path == "/") {
-		return n.handlers.getHandler(method)
+	if len(path) == 0 {
+		if h := n.handlers.getHandler(method); h != nil {
+			return h
+		}
+
+		for _, child := range n.children {
+			if child.prefix == "/" {
+				return child.handlers.getHandler(method)
+			}
+		}
+
+		return nil
 	}
 
 	for _, child := range n.children {
 		if strings.HasPrefix(path, child.prefix) {
 			return child.search(method, path, params)
 		}
+
+		if leafMatch(path, child.prefix) {
+			return child.handlers.getHandler(method)
+		}
+	}
+
+	if n.handlers.count() > 0 && path == "/" {
+		return n.handlers.getHandler(method)
 	}
 
 	if len(n.wildcard) == 0 {
 		return nil
 	}
 
-	idx := strings.IndexAny(path[1:], "/")
-	if idx == -1 {
-		idx = len(path)
+	segmentStart := 0
+	if strings.HasPrefix(path, "/") {
+		segmentStart = 1
 	}
 
-	value := path[:idx]
+	idx := strings.IndexAny(path[segmentStart:], "/")
+	if idx == -1 {
+		idx = len(path) - segmentStart
+	}
 
-	for _, v := range n.wildcard {
-		params.set(v.name, value)
-		path = path[idx:]
+	value := path[segmentStart : segmentStart+idx]
 
-		idx := strings.IndexAny(path, "/")
-		if idx == -1 {
-			idx = len(path)
+	for _, wc := range n.wildcard {
+		params.set(wc.name, value)
+		remaining := path[segmentStart+idx:]
+
+		if remaining == "/" {
+			return wc.node.handlers.getHandler(method)
 		}
 
-		path = path[idx:]
-		return v.node.search(method, path, params)
+		return wc.node.search(method, remaining, params)
 	}
 
 	return nil
@@ -90,20 +111,11 @@ func (n *node) insert(method string, pathSeq []string, handler Handler) {
 		name := paramName(currentSegment)
 
 		i := n.getWildcard(name)
-		wildcardNode := n.wildcard[i]
-
-		// if n.wildcard == nil {
-		// 	n.wildcard = map[string]*node{}
-		// }
-
-		// wildcardNode, ok := n.wildcard[name]
-		// if !ok {
-		// 	wildcardNode = newNode()
-		// 	n.wildcard[name] = wildcardNode
-		// }
-
 		pathSeq = slices.Delete(pathSeq, 0, 1)
+
+		wildcardNode := n.wildcard[i]
 		wildcardNode.node.insert(method, pathSeq, handler)
+
 		return
 	}
 
@@ -124,8 +136,8 @@ func (n *node) insert(method string, pathSeq []string, handler Handler) {
 		childNode := newNode()
 		childNode.prefix = currentSegment
 		childNode.insert(method, pathSeq, handler)
-
 		n.children = append(n.children, childNode)
+
 		return
 	}
 
@@ -192,7 +204,6 @@ func splitPath(path string) []string {
 	}
 
 	path = strings.ReplaceAll(path, "//", "/")
-
 	xs := strings.Split(path, "/")
 
 	var buf string
@@ -236,6 +247,7 @@ func validateSeq(xs []string) error {
 		if ok {
 			return fmt.Errorf("duplicate param name - %s", k)
 		}
+
 		set[k] = struct{}{}
 	}
 
@@ -244,4 +256,12 @@ func validateSeq(xs []string) error {
 	}
 
 	return nil
+}
+
+func leafMatch(pathSeq, prefix string) bool {
+	if len(prefix) == 0 || prefix[len(prefix)-1] != '/' {
+		return false
+	}
+
+	return len(pathSeq)+1 == len(prefix) && pathSeq == prefix[:len(prefix)-1]
 }

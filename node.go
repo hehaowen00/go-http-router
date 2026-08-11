@@ -24,7 +24,7 @@ func newNode() *node {
 }
 
 func (n *node) Search(method string, path string, i int, params *Params) Handler {
-	if i == len(path) {
+	if i == len(path) || (i == len(path)-1 && path[i] == '/') {
 		if h := n.handlers.Get(method); h != nil {
 			return h
 		}
@@ -36,10 +36,6 @@ func (n *node) Search(method string, path string, i int, params *Params) Handler
 		}
 
 		return nil
-	}
-
-	if n.handlers.Len() > 0 && pathFinished(path, i) {
-		return n.handlers.Get(method)
 	}
 
 	if i < len(path) {
@@ -79,11 +75,6 @@ func (n *node) Search(method string, path string, i int, params *Params) Handler
 
 	for _, wc := range n.wildcard {
 		params.set(wc.name, value)
-
-		remaining := path[segmentStart+idx:]
-		if remaining == "/" {
-			return wc.node.handlers.Get(method)
-		}
 
 		h := wc.node.Search(method, path, segmentStart+idx, params)
 		if h != nil {

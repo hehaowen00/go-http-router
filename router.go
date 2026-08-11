@@ -30,9 +30,6 @@ func (r *Router) Add(method string, path string, handler Handler) {
 func (r *Router) Search(method string, path string, params *Params) Handler {
 	params.clear()
 
-	// path = strings.TrimPrefix(path, "/")
-	// path = strings.TrimSuffix(path, "/")
-
 	h := r.root.Search(method, path, 0, params)
 	if h == nil {
 		params.clear()

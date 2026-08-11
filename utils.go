@@ -121,7 +121,3 @@ func leafMatch(pathSeq, prefix string) bool {
 func hasPrefixAt(path string, i int, prefix string) bool {
 	return len(prefix) <= len(path)-i && path[i:i+len(prefix)] == prefix
 }
-
-func pathFinished(path string, i int) bool {
-	return i == len(path) || (i == len(path)-1 && path[i] == '/')
-}

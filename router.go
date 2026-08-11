@@ -24,13 +24,16 @@ func (r *Router) Add(method string, path string, handler Handler) {
 		panic(err)
 	}
 
-	r.root.insert(method, pathSeq, handler)
+	r.root.Insert(method, pathSeq, handler)
 }
 
 func (r *Router) Search(method string, path string, params *Params) Handler {
 	params.clear()
 
-	h := r.root.search(method, path, params)
+	// path = strings.TrimPrefix(path, "/")
+	// path = strings.TrimSuffix(path, "/")
+
+	h := r.root.Search(method, path, 0, params)
 	if h == nil {
 		params.clear()
 	}

@@ -10,11 +10,6 @@ type param struct {
 	value string
 }
 
-func (p *Params) set(key string, value string) {
-	p.entries[p.idx] = param{key, value}
-	p.idx++
-}
-
 func (p *Params) Get(key string) string {
 	for idx := range p.idx {
 		e := p.entries[idx]
@@ -25,6 +20,14 @@ func (p *Params) Get(key string) string {
 	}
 
 	return ""
+}
+
+func (p *Params) set(key string, value string) {
+	if p.idx >= 32 {
+		return
+	}
+	p.entries[p.idx] = param{key, value}
+	p.idx++
 }
 
 func (p *Params) clear() {

@@ -3,7 +3,9 @@ package gohttprouter
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"strings"
 )
 
 type Handler interface {
@@ -26,82 +28,100 @@ func (c *Context) WriteJSON(status int, v any) error {
 	return json.NewEncoder(c.w).Encode(v)
 }
 
-type methodHandler struct {
-	get     Handler
-	query   Handler
-	post    Handler
-	patch   Handler
-	put     Handler
-	delete  Handler
-	connect Handler
-	options Handler
-	head    Handler
+func isParam(segment string) bool {
+	return strings.HasPrefix(segment, ":")
 }
 
-func (h *methodHandler) count() int {
-	handlers := []Handler{
-		h.get,
-		h.query,
-		h.post,
-		h.patch,
-		h.put,
-		h.delete,
-		h.connect,
-		h.options,
-		h.head,
-	}
+func paramName(segment string) string {
+	return strings.TrimPrefix(segment, ":")
+}
 
-	n := 0
+func longestMatch(left, right string) int {
+	var i int
 
-	for _, f := range handlers {
-		if f != nil {
-			n++
+	l := min(len(left), len(right))
+
+	for i = range l {
+		if left[i] != right[i] {
+			return i
 		}
 	}
 
-	return n
+	return i + 1
 }
 
-func (h *methodHandler) insertHandler(method string, handler Handler) {
-	switch method {
-	case http.MethodGet:
-		h.get = handler
-	case http.MethodPost:
-		h.post = handler
-	case http.MethodPatch:
-		h.patch = handler
-	case http.MethodPut:
-		h.put = handler
-	case http.MethodDelete:
-		h.delete = handler
-	case http.MethodConnect:
-		h.connect = handler
-	case http.MethodOptions:
-		h.options = handler
-	case http.MethodHead:
-		h.head = handler
+func splitPath(path string) []string {
+	path = strings.TrimSpace(path)
+
+	for strings.HasPrefix(path, "/") {
+		path = strings.TrimPrefix(path, "/")
 	}
+
+	for strings.HasSuffix(path, "/") {
+		path = strings.TrimSuffix(path, "/")
+	}
+
+	path = strings.ReplaceAll(path, "//", "/")
+	xs := strings.Split(path, "/")
+
+	var buf string
+	var res []string
+
+	for _, v := range xs {
+		if strings.HasPrefix(v, ":") {
+			if len(buf) > 0 {
+				res = append(res, buf+"/")
+				buf = ""
+			}
+			res = append(res, v)
+		} else {
+			buf += "/" + v
+		}
+	}
+
+	if buf != "" {
+		res = append(res, buf+"/")
+	}
+
+	return res
 }
 
-func (h *methodHandler) getHandler(method string) Handler {
-	switch method {
-	case http.MethodGet:
-		return h.get
-	case http.MethodPost:
-		return h.post
-	case http.MethodPatch:
-		return h.patch
-	case http.MethodPut:
-		return h.put
-	case http.MethodDelete:
-		return h.delete
-	case http.MethodConnect:
-		return h.connect
-	case http.MethodOptions:
-		return h.options
-	case http.MethodHead:
-		return h.head
-	default:
-		return nil
+func validateSeq(xs []string) error {
+	set := map[string]struct{}{}
+
+	for i := range xs {
+		k := xs[i]
+		if k[0] != ':' {
+			continue
+		}
+
+		_, ok := set[k]
+		if ok {
+			return fmt.Errorf("duplicate param name - %s", k)
+		}
+
+		set[k] = struct{}{}
 	}
+
+	if len(set) > 32 {
+		return fmt.Errorf("wildcard limit exceeded")
+	}
+
+	return nil
+}
+
+func leafMatch(pathSeq, prefix string) bool {
+	if len(prefix) == 0 || prefix[len(prefix)-1] != '/' {
+		return false
+	}
+
+	return len(pathSeq)+1 == len(prefix) && pathSeq == prefix[:len(prefix)-1]
+}
+
+func hasPrefixAt(path string, i int, prefix string) bool {
+	return len(prefix) <= len(path)-i && path[i:i+len(prefix)] == prefix
+}
+
+func pathFinished(path string, i int) bool {
+	return i == len(path) || (i == len(path)-1 && path[i] == '/')
 }

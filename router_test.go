@@ -19,13 +19,13 @@ func (dummyHandler) Handle(c Context) {
 func TestHandlersCount(t *testing.T) {
 	var h methodHandler
 
-	if got := h.count(); got != 0 {
+	if got := h.count; got != 0 {
 		t.Fatalf("empty handlers: count = %d, want 0", got)
 	}
 
-	h.insertHandler(http.MethodGet, dummyHandler{})
+	h.Insert(http.MethodGet, dummyHandler{})
 
-	if got := h.count(); got != 1 {
+	if got := h.count; got != 1 {
 		t.Fatalf("after GET: count = %d, want 1", got)
 	}
 
@@ -36,19 +36,19 @@ func TestHandlersCount(t *testing.T) {
 		http.MethodConnect,
 		http.MethodOptions,
 	} {
-		h.insertHandler(m, dummyHandler{})
+		h.Insert(m, dummyHandler{})
 	}
 
-	if got := h.count(); got != 6 {
+	if got := h.count; got != 6 {
 		t.Fatalf("all six methods: count = %d, want 6", got)
 	}
 
-	h.insertHandler(http.MethodGet, dummyHandler{})
-	if got := h.count(); got != 6 {
+	h.Insert(http.MethodGet, dummyHandler{})
+	if got := h.count; got != 6 {
 		t.Fatalf("after re-setting GET: count = %d, want 6", got)
 	}
 
-	handler := h.getHandler(http.MethodPatch)
+	handler := h.Get(http.MethodPatch)
 	if handler != nil {
 		t.Fatalf("expected nil for PATCH, got %v", handler)
 	}
@@ -59,7 +59,7 @@ func TestPathSplit(t *testing.T) {
 		"/public//",
 		"/api//",
 		"/api/hello//",
-		"/api/hello/world",
+		"/api/hello/world/",
 		"/api/hello/:message/n//",
 		"/api/hello//n",
 		"/api/hello/:a/:b",

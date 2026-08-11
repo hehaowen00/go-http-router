@@ -1,7 +1,7 @@
 package gohttprouter
 
 import (
-	"fmt"
+	"net/http"
 	"slices"
 	"strings"
 )
@@ -23,59 +23,51 @@ func newNode() *node {
 	return &node{}
 }
 
-func (n *node) getWildcard(name string) int {
-	for i := range n.wildcard {
-		if n.wildcard[i].name == name {
-			return i
-		}
-	}
-
-	n.wildcard = append(n.wildcard, &wildcard{
-		name: name,
-		node: newNode(),
-	})
-
-	return len(n.wildcard) - 1
-}
-
-func (n *node) search(method string, path string, params *Params) Handler {
-	path = strings.TrimPrefix(path, n.prefix)
-
-	if len(path) == 0 {
-		if h := n.handlers.getHandler(method); h != nil {
+func (n *node) Search(method string, path string, i int, params *Params) Handler {
+	if i == len(path) {
+		if h := n.handlers.Get(method); h != nil {
 			return h
 		}
 
 		for _, child := range n.children {
 			if child.prefix == "/" {
-				return child.handlers.getHandler(method)
+				return child.handlers.Get(method)
 			}
 		}
 
 		return nil
 	}
 
-	for _, child := range n.children {
-		if strings.HasPrefix(path, child.prefix) {
-			return child.search(method, path, params)
-		}
-
-		if leafMatch(path, child.prefix) {
-			return child.handlers.getHandler(method)
-		}
+	if n.handlers.Len() > 0 && pathFinished(path, i) {
+		return n.handlers.Get(method)
 	}
 
-	if n.handlers.count() > 0 && path == "/" {
-		return n.handlers.getHandler(method)
+	if i < len(path) {
+		b := path[i]
+
+		for _, child := range n.children {
+			if b == child.prefix[0] && hasPrefixAt(path, i, child.prefix) {
+				h := child.Search(method, path, i+len(child.prefix), params)
+				if h != nil {
+					return h
+				}
+
+				break
+			}
+
+			if leafMatch(path[i:], child.prefix) {
+				return child.handlers.Get(method)
+			}
+		}
 	}
 
 	if len(n.wildcard) == 0 {
 		return nil
 	}
 
-	segmentStart := 0
-	if strings.HasPrefix(path, "/") {
-		segmentStart = 1
+	segmentStart := i
+	if path[segmentStart] == '/' {
+		segmentStart++
 	}
 
 	idx := strings.IndexAny(path[segmentStart:], "/")
@@ -87,21 +79,24 @@ func (n *node) search(method string, path string, params *Params) Handler {
 
 	for _, wc := range n.wildcard {
 		params.set(wc.name, value)
-		remaining := path[segmentStart+idx:]
 
+		remaining := path[segmentStart+idx:]
 		if remaining == "/" {
-			return wc.node.handlers.getHandler(method)
+			return wc.node.handlers.Get(method)
 		}
 
-		return wc.node.search(method, remaining, params)
+		h := wc.node.Search(method, path, segmentStart+idx, params)
+		if h != nil {
+			return h
+		}
 	}
 
 	return nil
 }
 
-func (n *node) insert(method string, pathSeq []string, handler Handler) {
+func (n *node) Insert(method string, pathSeq []string, handler Handler) {
 	if len(pathSeq) == 0 {
-		n.handlers.insertHandler(method, handler)
+		n.handlers.Insert(method, handler)
 		return
 	}
 
@@ -114,7 +109,7 @@ func (n *node) insert(method string, pathSeq []string, handler Handler) {
 		pathSeq = slices.Delete(pathSeq, 0, 1)
 
 		wildcardNode := n.wildcard[i]
-		wildcardNode.node.insert(method, pathSeq, handler)
+		wildcardNode.node.Insert(method, pathSeq, handler)
 
 		return
 	}
@@ -133,10 +128,15 @@ func (n *node) insert(method string, pathSeq []string, handler Handler) {
 	if shortestIdx < 0 {
 		pathSeq = slices.Delete(pathSeq, 0, 1)
 
-		childNode := newNode()
-		childNode.prefix = currentSegment
-		childNode.insert(method, pathSeq, handler)
-		n.children = append(n.children, childNode)
+		if !isParam(currentSegment) {
+			childNode := newNode()
+			childNode.prefix = currentSegment
+			childNode.Insert(method, pathSeq, handler)
+			n.children = append(n.children, childNode)
+		} else {
+			i := n.getWildcard(currentSegment)
+			n.wildcard[i].node.Insert(method, pathSeq, handler)
+		}
 
 		return
 	}
@@ -149,7 +149,7 @@ func (n *node) insert(method string, pathSeq []string, handler Handler) {
 			pathSeq[0] = pathSeq[0][best:]
 		}
 
-		closest.insert(method, pathSeq, handler)
+		closest.Insert(method, pathSeq, handler)
 	}
 
 	if len(closest.prefix) > best {
@@ -166,102 +166,106 @@ func (n *node) insert(method string, pathSeq []string, handler Handler) {
 			pathSeq[0] = pathSeq[0][best:]
 		}
 
-		newChild.insert(method, pathSeq, handler)
+		newChild.Insert(method, pathSeq, handler)
 	}
 }
 
-func isParam(segment string) bool {
-	return strings.HasPrefix(segment, ":")
-}
-
-func paramName(segment string) string {
-	return strings.TrimPrefix(segment, ":")
-}
-
-func longestMatch(left, right string) int {
-	var i int
-
-	l := min(len(left), len(right))
-
-	for i = range l {
-		if left[i] != right[i] {
+func (n *node) getWildcard(name string) int {
+	for i := range n.wildcard {
+		if n.wildcard[i].name == name {
 			return i
 		}
 	}
 
-	return i + 1
+	n.wildcard = append(n.wildcard, &wildcard{
+		name: name,
+		node: newNode(),
+	})
+
+	return len(n.wildcard) - 1
 }
 
-func splitPath(path string) []string {
-	path = strings.TrimSpace(path)
-
-	for strings.HasPrefix(path, "/") {
-		path = strings.TrimPrefix(path, "/")
-	}
-
-	for strings.HasSuffix(path, "/") {
-		path = strings.TrimSuffix(path, "/")
-	}
-
-	path = strings.ReplaceAll(path, "//", "/")
-	xs := strings.Split(path, "/")
-
-	var buf string
-	var res []string
-
-	for _, v := range xs {
-		if strings.HasPrefix(v, ":") {
-			if len(buf) > 0 {
-				res = append(res, buf+"/")
-				buf = ""
-				res = append(res, v)
-			} else {
-				res = append(res, v)
-			}
-		} else {
-			// if buf == "" {
-			// 	buf = v
-			// } else {
-			buf += "/" + v
-			// }
-		}
-	}
-
-	if buf != "" {
-		res = append(res, buf+"/")
-	}
-
-	return res
+type methodHandler struct {
+	get     Handler
+	query   Handler
+	post    Handler
+	patch   Handler
+	put     Handler
+	delete  Handler
+	connect Handler
+	options Handler
+	head    Handler
+	count   int
 }
 
-func validateSeq(xs []string) error {
-	set := map[string]struct{}{}
-
-	for i := range xs {
-		k := xs[i]
-		if k[0] != ':' {
-			continue
-		}
-
-		_, ok := set[k]
-		if ok {
-			return fmt.Errorf("duplicate param name - %s", k)
-		}
-
-		set[k] = struct{}{}
-	}
-
-	if len(set) > 32 {
-		return fmt.Errorf("wildcard limit exceeded")
-	}
-
-	return nil
+func (h *methodHandler) Len() int {
+	return h.count
 }
 
-func leafMatch(pathSeq, prefix string) bool {
-	if len(prefix) == 0 || prefix[len(prefix)-1] != '/' {
+func (h *methodHandler) Get(method string) Handler {
+	switch method {
+	case http.MethodGet:
+		return h.get
+	case http.MethodPost:
+		return h.post
+	case http.MethodPatch:
+		return h.patch
+	case http.MethodPut:
+		return h.put
+	case http.MethodDelete:
+		return h.delete
+	case http.MethodConnect:
+		return h.connect
+	case http.MethodOptions:
+		return h.options
+	case http.MethodHead:
+		return h.head
+	default:
+		return nil
+	}
+}
+
+func (h *methodHandler) Insert(method string, handler Handler) {
+	h.set(method, handler)
+}
+
+func (h *methodHandler) Remove(method string) bool {
+	return h.set(method, nil)
+}
+
+func (h *methodHandler) set(method string, handler Handler) bool {
+	var target *Handler
+
+	switch method {
+	case http.MethodGet:
+		target = &h.get
+	case http.MethodPost:
+		target = &h.post
+	case http.MethodPatch:
+		target = &h.patch
+	case http.MethodPut:
+		target = &h.put
+	case http.MethodDelete:
+		target = &h.delete
+	case http.MethodConnect:
+		target = &h.connect
+	case http.MethodOptions:
+		target = &h.options
+	case http.MethodHead:
+		target = &h.head
+	default:
 		return false
 	}
 
-	return len(pathSeq)+1 == len(prefix) && pathSeq == prefix[:len(prefix)-1]
+	if *target != nil && handler == nil {
+		*target = handler
+		h.count--
+		return true
+	} else if *target == nil && handler != nil {
+		*target = handler
+		h.count++
+		return true
+	}
+
+	return false
 }

@@ -5,15 +5,17 @@ import (
 )
 
 type Router struct {
-	root *node
+	nodes []node
+	root  int32
 }
 
 func New() *Router {
-	root := newNode()
-
-	return &Router{
-		root: root,
+	r := &Router{
+		nodes: make([]node, 0, 64),
 	}
+	r.root = r.newNode()
+
+	return r
 }
 
 func (r *Router) Add(method string, path string, handler Handler) {
@@ -24,13 +26,13 @@ func (r *Router) Add(method string, path string, handler Handler) {
 		panic(err)
 	}
 
-	r.root.Insert(method, pathSeq, handler)
+	r.insert(r.root, method, pathSeq, handler)
 }
 
 func (r *Router) Search(method string, path string, params *Params) Handler {
 	params.clear()
 
-	h := r.root.Search(method, path, 0, params)
+	h := r.search(r.root, method, path, 0, params)
 	if h == nil {
 		params.clear()
 	}

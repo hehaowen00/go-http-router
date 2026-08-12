@@ -2,6 +2,7 @@ package gohttprouter
 
 import (
 	"log"
+	"math/rand/v2"
 	"net/http"
 	"slices"
 	"testing"
@@ -124,6 +125,7 @@ func TestRouterGithub(t *testing.T) {
 
 	for _, route := range githubAPI {
 		r.Add(route[0], route[1], dummyHandler{})
+
 		h := r.Search(route[0], route[1], &params)
 		if h == nil {
 			inspect.Inspect(r)
@@ -152,6 +154,29 @@ func BenchmarkRouter(b *testing.B) {
 
 	for i := 0; b.Loop(); i++ {
 		for _, route := range githubAPI {
+			handler := r.Search(route[0], route[1], &params)
+			if handler == nil {
+				b.Fatalf("route not found: %s %s", route[0], route[1])
+			}
+		}
+	}
+}
+
+func BenchmarkRouterRandom(b *testing.B) {
+	r := New()
+	for _, route := range githubAPI {
+		r.Add(route[0], route[1], dummyHandler{})
+	}
+
+	xs := rand.Perm(len(githubAPI))
+	b.ResetTimer()
+
+	params := Params{}
+
+	for i := 0; b.Loop(); i++ {
+		for _, j := range xs {
+			route := githubAPI[j]
+
 			handler := r.Search(route[0], route[1], &params)
 			if handler == nil {
 				b.Fatalf("route not found: %s %s", route[0], route[1])

@@ -3,7 +3,6 @@ package gohttprouter
 import (
 	"net/http"
 	"slices"
-	"strings"
 )
 
 type node struct {
@@ -96,7 +95,13 @@ func (r *Router) search(
 		segmentStart++
 	}
 
-	segmentEnd := strings.IndexAny(path[segmentStart:], "/")
+	segmentEnd := -1
+	for j := segmentStart; j < len(path); j++ {
+		if path[j] == '/' {
+			segmentEnd = j - segmentStart
+			break
+		}
+	}
 	if segmentEnd == -1 {
 		segmentEnd = len(path) - segmentStart
 	}

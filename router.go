@@ -14,6 +14,7 @@ func New() *Router {
 	r := &Router{
 		nodes: make([]node, 0, 64),
 	}
+
 	r.root = r.newNode()
 
 	return r
@@ -36,7 +37,7 @@ func (r *Router) Add(method string, path string, handler Handler) {
 }
 
 func (r *Router) Search(method string, path string, params *Params) Handler {
-	params.clear()
+	params.reset()
 
 	methodIndex := methodToEnum(method)
 	if methodIndex == 255 {
@@ -45,7 +46,7 @@ func (r *Router) Search(method string, path string, params *Params) Handler {
 
 	h := r.search(r.root, methodIndex, path, 0, params)
 	if h == nil {
-		params.clear()
+		params.reset()
 	}
 
 	return h

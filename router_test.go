@@ -106,8 +106,6 @@ func TestRouter(t *testing.T) {
 		r.GET(route, dummyHandler{})
 	}
 
-	// inspect.Inspect(r)
-
 	params := Params{}
 
 	for _, route := range routes {
@@ -140,6 +138,31 @@ func TestRouterGithub(t *testing.T) {
 			inspect.Inspect(r)
 			t.Log("failed to find", route[0], route[1])
 			t.FailNow()
+		}
+	}
+}
+
+func BenchmarkBuildGithubAPI(b *testing.B) {
+	b.ReportAllocs()
+
+	for i := 0; b.Loop(); i++ {
+		r := New()
+
+		for _, route := range githubAPI {
+			r.Add(route[0], route[1], dummyHandler{})
+		}
+	}
+}
+
+func BenchmarkBuildGithubAPIInsertOnly(b *testing.B) {
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	for i := 0; b.Loop(); i++ {
+		r := New()
+
+		for _, route := range githubAPI {
+			r.Add(route[0], route[1], dummyHandler{})
 		}
 	}
 }

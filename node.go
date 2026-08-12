@@ -64,15 +64,15 @@ func (r *Router) getWildcard(idx nodePtr, name string) int32 {
 }
 
 func (r *Router) search(
-	idx nodePtr,
+	nodeIdx nodePtr,
 	method methodEnum,
 	path string,
-	i int,
+	idx int,
 	params *Params,
 ) Handler {
-	n := &r.nodes[idx]
+	n := &r.nodes[nodeIdx]
 
-	if i == len(path) || (i == len(path)-1 && path[i] == '/') {
+	if idx == len(path) || (idx == len(path)-1 && path[idx] == '/') {
 		if h := r.handlers[n.handler].Get(method); h != nil {
 			return h
 		}
@@ -86,31 +86,39 @@ func (r *Router) search(
 		return nil
 	}
 
-	if i < len(path) {
-		b := path[i]
-		rem := len(path) - i
+	if idx < len(path) {
+		b := path[idx]
+		rem := len(path) - idx
 
 		for j, c := range n.children {
+			if b != n.fingerprint[j] {
+				continue
+			}
+
 			child := &r.nodes[c]
+			pLen := len(child.prefix)
 
-			if b == n.fingerprint[j] && hasPrefixAt(path, i, child.prefix) {
-				paramsIdx := params.save()
+			if pLen <= rem {
+				if path[idx:idx+pLen] == child.prefix {
+					paramsIdx := params.save()
 
-				h := r.search(c, method, path, i+len(child.prefix), params)
-				if h != nil {
-					return h
+					h := r.search(c, method, path, idx+pLen, params)
+					if h != nil {
+						return h
+					}
+
+					params.restore(paramsIdx)
 				}
 
-				params.restore(paramsIdx)
 				break
 			}
 
-			if len(child.prefix) > rem && leafMatch(path[i:], child.prefix) {
-				h := r.handlers[child.handler].Get(method)
-				if h != nil {
-					return h
-				}
+			if pLen == rem+1 && child.prefix[pLen-1] == '/' &&
+				path[idx:] == child.prefix[:rem] {
+				return r.handlers[child.handler].Get(method)
 			}
+
+			break
 		}
 	}
 
@@ -118,12 +126,12 @@ func (r *Router) search(
 		return nil
 	}
 
-	segmentStart := i
+	segmentStart := idx
 	if path[segmentStart] == '/' {
 		segmentStart++
 	}
 
-	segmentEnd := strings.IndexByte(string(path[segmentStart:]), '/')
+	segmentEnd := strings.IndexByte(path[segmentStart:], '/')
 	if segmentEnd == -1 {
 		segmentEnd = len(path) - segmentStart
 	}

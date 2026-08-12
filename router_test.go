@@ -85,6 +85,19 @@ func TestPathSplit(t *testing.T) {
 	}
 }
 
+func TestRootRoute(t *testing.T) {
+	r := New()
+	r.GET("/", dummyHandler{})
+
+	params := Params{}
+
+	for _, path := range []string{"/", "", "//"} {
+		if h := r.Search(http.MethodGet, path, &params); h == nil {
+			t.Fatalf("Search(%q) = nil, want root handler", path)
+		}
+	}
+}
+
 func TestRouter(t *testing.T) {
 	routes := []string{
 		"/public/",

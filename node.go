@@ -12,6 +12,8 @@ type handlerPtr int32
 type node struct {
 	prefix      string
 	handler     handlerPtr
+	mask        methodMask
+	hasParams   bool
 	fingerprint []byte
 	children    []nodePtr
 	wildcard    []wildcard
@@ -43,12 +45,12 @@ func (r *Router) newHandler() handlerPtr {
 	return handlerPtr(len(r.handlers) - 1)
 }
 
-func (r *Router) getWildcard(idx nodePtr, name string) int32 {
+func (r *Router) getWildcard(idx nodePtr, name string) (int32, bool) {
 	n := &r.nodes[idx]
 
 	for i := range n.wildcard {
 		if n.wildcard[i].name == name {
-			return int32(i)
+			return int32(i), false
 		}
 	}
 
@@ -60,7 +62,7 @@ func (r *Router) getWildcard(idx nodePtr, name string) int32 {
 		node: childIdx,
 	})
 
-	return int32(len(n.wildcard) - 1)
+	return int32(len(n.wildcard) - 1), true
 }
 
 func (r *Router) search(
@@ -71,6 +73,10 @@ func (r *Router) search(
 	params *Params,
 ) Handler {
 	n := &r.nodes[nodeIdx]
+
+	if n.mask&(1<<method) == 0 {
+		return nil
+	}
 
 	if idx == len(path) || (idx == len(path)-1 && path[idx] == '/') {
 		if h := r.handlers[n.handler].Get(method); h != nil {
@@ -86,40 +92,42 @@ func (r *Router) search(
 		return nil
 	}
 
-	if idx < len(path) {
-		b := path[idx]
-		rem := len(path) - idx
+	b := path[idx]
+	rem := len(path) - idx
 
-		for j, c := range n.children {
-			if b != n.fingerprint[j] {
-				continue
-			}
+	for j, c := range n.children {
+		if b != n.fingerprint[j] {
+			continue
+		}
 
-			child := &r.nodes[c]
-			pLen := len(child.prefix)
+		child := &r.nodes[c]
+		pLen := len(child.prefix)
 
-			if pLen <= rem {
-				if path[idx:idx+pLen] == child.prefix {
-					paramsIdx := params.save()
+		if pLen <= rem {
+			if path[idx:idx+pLen] == child.prefix {
+				var paramsIdx paramsIndex
 
-					h := r.search(c, method, path, idx+pLen, params)
-					if h != nil {
-						return h
-					}
-
-					params.restore(paramsIdx)
+				if child.hasParams {
+					paramsIdx = params.save()
 				}
 
-				break
-			}
+				h := r.search(c, method, path, idx+pLen, params)
+				if h != nil {
+					return h
+				}
 
-			if pLen == rem+1 && child.prefix[pLen-1] == '/' &&
-				path[idx:] == child.prefix[:rem] {
-				return r.handlers[child.handler].Get(method)
+				if child.hasParams {
+					params.restore(paramsIdx)
+				}
 			}
-
-			break
+		} else if pLen == rem+1 && child.prefix[pLen-1] == '/' &&
+			path[idx:] == child.prefix[:rem] {
+			if h := r.handlers[child.handler].Get(method); h != nil {
+				return h
+			}
 		}
+
+		break
 	}
 
 	if len(n.wildcard) == 0 {
@@ -166,10 +174,14 @@ func (r *Router) insert(
 	method methodEnum,
 	pathSeq []string,
 	handler Handler,
-) {
+) (changed bool, newParam bool) {
 	if len(pathSeq) == 0 {
-		r.handlers[r.nodes[nodeIdx].handler].Insert(method, handler)
-		return
+		if r.handlers[r.nodes[nodeIdx].handler].Insert(method, handler) {
+			r.nodes[nodeIdx].mask |= methodMask(1) << method
+			return true, false
+		}
+
+		return false, false
 	}
 
 	currentSegment := pathSeq[0]
@@ -178,13 +190,25 @@ func (r *Router) insert(
 	if isParam(currentSegment) {
 		name := paramName(currentSegment)
 
-		wildcardIdx := r.getWildcard(nodeIdx, name)
+		wildcardIdx, created := r.getWildcard(nodeIdx, name)
 		n = &r.nodes[nodeIdx]
 
 		pathSeq = slices.Delete(pathSeq, 0, 1)
-		r.insert(n.wildcard[wildcardIdx].node, method, pathSeq, handler)
+		changed, newParam = r.insert(
+			n.wildcard[wildcardIdx].node,
+			method,
+			pathSeq,
+			handler,
+		)
 
-		return
+		if changed {
+			n.mask |= methodMask(1) << method
+		}
+		if created || newParam {
+			n.hasParams = true
+		}
+
+		return changed, created || newParam
 	}
 
 	closestIdx := -1
@@ -201,13 +225,25 @@ func (r *Router) insert(
 	if closestIdx < 0 {
 		childIdx := r.newNode()
 		r.nodes[childIdx].prefix = currentSegment
-		r.insert(childIdx, method, slices.Delete(pathSeq, 0, 1), handler)
+		changed, newParam = r.insert(
+			childIdx,
+			method,
+			slices.Delete(pathSeq, 0, 1),
+			handler,
+		)
 
 		n = &r.nodes[nodeIdx]
 		n.children = append(n.children, childIdx)
 		n.rebuildFingerprint(r)
 
-		return
+		if changed {
+			n.mask |= methodMask(1) << method
+		}
+		if newParam {
+			n.hasParams = true
+		}
+
+		return changed, newParam
 	}
 
 	closest := &r.nodes[n.children[closestIdx]]
@@ -218,9 +254,21 @@ func (r *Router) insert(
 			pathSeq[0] = pathSeq[0][best:]
 		}
 
-		r.insert(n.children[closestIdx], method, pathSeq, handler)
+		changed, newParam = r.insert(
+			n.children[closestIdx],
+			method,
+			pathSeq,
+			handler,
+		)
 
-		return
+		if changed {
+			r.nodes[nodeIdx].mask |= methodMask(1) << method
+		}
+		if newParam {
+			r.nodes[nodeIdx].hasParams = true
+		}
+
+		return changed, newParam
 	}
 
 	if len(closest.prefix) > best {
@@ -230,8 +278,11 @@ func (r *Router) insert(
 
 		newChild := &r.nodes[newChildIdx]
 		newChild.prefix = closest.prefix[:best]
+		newChild.mask = closest.mask
+		newChild.hasParams = closest.hasParams
 		closest.prefix = closest.prefix[best:]
 		newChild.children = append(newChild.children, n.children[closestIdx])
+		newChild.rebuildFingerprint(r)
 
 		n.children[closestIdx] = newChildIdx
 		n.rebuildFingerprint(r)
@@ -242,6 +293,17 @@ func (r *Router) insert(
 			pathSeq[0] = pathSeq[0][best:]
 		}
 
-		r.insert(newChildIdx, method, pathSeq, handler)
+		changed, newParam = r.insert(newChildIdx, method, pathSeq, handler)
+
+		if changed {
+			r.nodes[nodeIdx].mask |= methodMask(1) << method
+		}
+		if newParam {
+			r.nodes[nodeIdx].hasParams = true
+		}
+
+		return changed, newParam
 	}
+
+	return false, false
 }

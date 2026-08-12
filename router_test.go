@@ -180,7 +180,7 @@ func BenchmarkBuildGithubAPIInsertOnly(b *testing.B) {
 	}
 }
 
-func BenchmarkRouter(b *testing.B) {
+func BenchmarkRouterGithub(b *testing.B) {
 	r := New()
 	for _, route := range githubAPI {
 		r.Add(route[0], route[1], dummyHandler{})
@@ -198,7 +198,7 @@ func BenchmarkRouter(b *testing.B) {
 	}
 }
 
-func BenchmarkRouterRandom(b *testing.B) {
+func BenchmarkRouterGithubRandom(b *testing.B) {
 	r := New()
 	for _, route := range githubAPI {
 		r.Add(route[0], route[1], dummyHandler{})

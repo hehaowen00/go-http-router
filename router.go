@@ -5,9 +5,8 @@ import (
 )
 
 type Router struct {
-	nodes    []node
-	handlers []methodHandler
-	root     nodePtr
+	nodes []node
+	roots [methodCount]nodePtr
 }
 
 func New() *Router {
@@ -15,7 +14,9 @@ func New() *Router {
 		nodes: make([]node, 0, 64),
 	}
 
-	r.root = r.newNode()
+	for i := range r.roots {
+		r.roots[i] = r.newNode()
+	}
 
 	return r
 }
@@ -33,7 +34,7 @@ func (r *Router) Add(method string, path string, handler Handler) {
 		return
 	}
 
-	r.insert(r.root, methodIndex, pathSeq, handler)
+	r.insert(r.roots[methodIndex], pathSeq, handler)
 }
 
 func (r *Router) Search(method string, path string, params *Params) Handler {
@@ -44,7 +45,7 @@ func (r *Router) Search(method string, path string, params *Params) Handler {
 		return nil
 	}
 
-	h := r.search(r.root, methodIndex, path, 0, params)
+	h := r.search(r.roots[methodIndex], path, 0, params)
 	if h == nil {
 		params.reset()
 	}

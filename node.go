@@ -16,11 +16,11 @@ type node struct {
 	wildcard    []wildcard
 }
 
-func (n *node) rebuildFingerprint(r *Router) {
+func (n *node) rebuildFingerprint(nodes []node) {
 	n.fingerprint = n.fingerprint[:0]
 
 	for _, c := range n.children {
-		n.fingerprint = append(n.fingerprint, r.nodes[c].prefix[0])
+		n.fingerprint = append(n.fingerprint, nodes[c].prefix[0])
 	}
 }
 
@@ -28,13 +28,13 @@ func (n *node) isEmpty() bool {
 	return n.handler == nil && len(n.children) == 0 && len(n.wildcard) == 0
 }
 
-func (n *node) recomputeHasParams(r *Router) bool {
+func (n *node) recomputeHasParams(nodes []node) bool {
 	if len(n.wildcard) > 0 {
 		return true
 	}
 
 	for _, c := range n.children {
-		if r.nodes[c].hasParams {
+		if nodes[c].hasParams {
 			return true
 		}
 	}
@@ -47,14 +47,14 @@ type wildcard struct {
 	node nodePtr
 }
 
-func (r *Router) newNode() nodePtr {
-	r.nodes = append(r.nodes, node{})
+func newNode(nodes *[]node) nodePtr {
+	*nodes = append(*nodes, node{})
 
-	return nodePtr(len(r.nodes) - 1)
+	return nodePtr(len(*nodes) - 1)
 }
 
-func (r *Router) getWildcard(idx nodePtr, name string) (int32, bool) {
-	n := &r.nodes[idx]
+func getWildcard(nodes *[]node, idx nodePtr, name string) (int32, bool) {
+	n := &(*nodes)[idx]
 
 	for i := range n.wildcard {
 		if n.wildcard[i].name == name {
@@ -62,8 +62,8 @@ func (r *Router) getWildcard(idx nodePtr, name string) (int32, bool) {
 		}
 	}
 
-	childIdx := r.newNode()
-	n = &r.nodes[idx]
+	childIdx := newNode(nodes)
+	n = &(*nodes)[idx]
 
 	n.wildcard = append(n.wildcard, wildcard{
 		name: name,
@@ -73,13 +73,14 @@ func (r *Router) getWildcard(idx nodePtr, name string) (int32, bool) {
 	return int32(len(n.wildcard) - 1), true
 }
 
-func (r *Router) search(
+func search(
+	nodes []node,
 	nodeIdx nodePtr,
 	path string,
 	idx int,
 	params *Params,
 ) Handler {
-	n := &r.nodes[nodeIdx]
+	n := &nodes[nodeIdx]
 
 	if idx == len(path) || (idx == len(path)-1 && path[idx] == '/') {
 		if n.handler != nil {
@@ -87,8 +88,8 @@ func (r *Router) search(
 		}
 
 		for _, c := range n.children {
-			if r.nodes[c].prefix == "/" {
-				return r.nodes[c].handler
+			if nodes[c].prefix == "/" {
+				return nodes[c].handler
 			}
 		}
 
@@ -103,7 +104,7 @@ func (r *Router) search(
 			continue
 		}
 
-		child := &r.nodes[c]
+		child := &nodes[c]
 		pLen := len(child.prefix)
 
 		if pLen <= rem && path[idx:idx+pLen] == child.prefix {
@@ -113,7 +114,7 @@ func (r *Router) search(
 				paramsIdx = params.save()
 			}
 
-			h := r.search(c, path, idx+pLen, params)
+			h := search(nodes, c, path, idx+pLen, params)
 			if h != nil {
 				return h
 			}
@@ -153,7 +154,8 @@ func (r *Router) search(
 		wc := &n.wildcard[wi]
 		params.set(wc.name, value)
 
-		h := r.search(
+		h := search(
+			nodes,
 			nodePtr(wc.node),
 			path,
 			segmentStart+segmentEnd,
@@ -169,27 +171,29 @@ func (r *Router) search(
 	return nil
 }
 
-func (r *Router) insert(
+func insert(
+	nodes *[]node,
 	nodeIdx nodePtr,
 	pathSeq []string,
 	handler Handler,
 ) (newParam bool) {
 	if len(pathSeq) == 0 {
-		r.nodes[nodeIdx].handler = handler
+		(*nodes)[nodeIdx].handler = handler
 		return false
 	}
 
 	currentSegment := pathSeq[0]
-	n := &r.nodes[nodeIdx]
+	n := &(*nodes)[nodeIdx]
 
 	if isParam(currentSegment) {
 		name := paramName(currentSegment)
 
-		wildcardIdx, created := r.getWildcard(nodeIdx, name)
-		n = &r.nodes[nodeIdx]
+		wildcardIdx, created := getWildcard(nodes, nodeIdx, name)
+		n = &(*nodes)[nodeIdx]
 
 		pathSeq = slices.Delete(pathSeq, 0, 1)
-		newParam = r.insert(
+		newParam = insert(
+			nodes,
 			n.wildcard[wildcardIdx].node,
 			pathSeq,
 			handler,
@@ -206,7 +210,7 @@ func (r *Router) insert(
 	best := 0
 
 	for i := range n.children {
-		score := longestMatch(currentSegment, r.nodes[n.children[i]].prefix)
+		score := longestMatch(currentSegment, (*nodes)[n.children[i]].prefix)
 		if score > best {
 			best = score
 			closestIdx = i
@@ -214,17 +218,18 @@ func (r *Router) insert(
 	}
 
 	if closestIdx < 0 {
-		childIdx := r.newNode()
-		r.nodes[childIdx].prefix = currentSegment
-		newParam = r.insert(
+		childIdx := newNode(nodes)
+		(*nodes)[childIdx].prefix = currentSegment
+		newParam = insert(
+			nodes,
 			childIdx,
 			slices.Delete(pathSeq, 0, 1),
 			handler,
 		)
 
-		n = &r.nodes[nodeIdx]
+		n = &(*nodes)[nodeIdx]
 		n.children = append(n.children, childIdx)
-		n.rebuildFingerprint(r)
+		n.rebuildFingerprint(*nodes)
 
 		if newParam {
 			n.hasParams = true
@@ -233,7 +238,7 @@ func (r *Router) insert(
 		return newParam
 	}
 
-	closest := &r.nodes[n.children[closestIdx]]
+	closest := &(*nodes)[n.children[closestIdx]]
 	if len(closest.prefix) == best {
 		if best == len(pathSeq[0]) {
 			pathSeq = slices.Delete(pathSeq, 0, 1)
@@ -241,33 +246,34 @@ func (r *Router) insert(
 			pathSeq[0] = pathSeq[0][best:]
 		}
 
-		newParam = r.insert(
+		newParam = insert(
+			nodes,
 			n.children[closestIdx],
 			pathSeq,
 			handler,
 		)
 
 		if newParam {
-			r.nodes[nodeIdx].hasParams = true
+			(*nodes)[nodeIdx].hasParams = true
 		}
 
 		return newParam
 	}
 
 	if len(closest.prefix) > best {
-		newChildIdx := r.newNode()
-		n = &r.nodes[nodeIdx]
-		closest = &r.nodes[n.children[closestIdx]]
+		newChildIdx := newNode(nodes)
+		n = &(*nodes)[nodeIdx]
+		closest = &(*nodes)[n.children[closestIdx]]
 
-		newChild := &r.nodes[newChildIdx]
+		newChild := &(*nodes)[newChildIdx]
 		newChild.prefix = closest.prefix[:best]
 		newChild.hasParams = closest.hasParams
 		closest.prefix = closest.prefix[best:]
 		newChild.children = append(newChild.children, n.children[closestIdx])
-		newChild.rebuildFingerprint(r)
+		newChild.rebuildFingerprint(*nodes)
 
 		n.children[closestIdx] = newChildIdx
-		n.rebuildFingerprint(r)
+		n.rebuildFingerprint(*nodes)
 
 		if best >= len(currentSegment) {
 			pathSeq = slices.Delete(pathSeq, 0, 1)
@@ -275,14 +281,98 @@ func (r *Router) insert(
 			pathSeq[0] = pathSeq[0][best:]
 		}
 
-		newParam = r.insert(newChildIdx, pathSeq, handler)
+		newParam = insert(nodes, newChildIdx, pathSeq, handler)
 
 		if newParam {
-			r.nodes[nodeIdx].hasParams = true
+			(*nodes)[nodeIdx].hasParams = true
 		}
 
 		return newParam
 	}
 
 	return false
+}
+
+func remove(nodes []node, nodeIdx nodePtr, pathSeq []string) bool {
+	if len(pathSeq) == 0 {
+		n := &nodes[nodeIdx]
+
+		if n.handler == nil {
+			return false
+		}
+
+		n.handler = nil
+		return true
+	}
+
+	currentSegment := pathSeq[0]
+	n := &nodes[nodeIdx]
+
+	if isParam(currentSegment) {
+		name := paramName(currentSegment)
+
+		for i := range n.wildcard {
+			if n.wildcard[i].name != name {
+				continue
+			}
+
+			childIdx := n.wildcard[i].node
+
+			removed := remove(nodes, childIdx, pathSeq[1:])
+			if !removed {
+				return false
+			}
+
+			n = &nodes[nodeIdx]
+			if nodes[childIdx].isEmpty() {
+				n.wildcard = slices.Delete(n.wildcard, i, i+1)
+			}
+			n.hasParams = n.recomputeHasParams(nodes)
+
+			return true
+		}
+
+		return false
+	}
+
+	closestIdx := -1
+	best := 0
+
+	for i := range n.children {
+		score := longestMatch(currentSegment, nodes[n.children[i]].prefix)
+		if score > best {
+			best = score
+			closestIdx = i
+		}
+	}
+
+	if closestIdx < 0 {
+		return false
+	}
+
+	childIdx := n.children[closestIdx]
+
+	if len(nodes[childIdx].prefix) > best {
+		return false
+	}
+
+	if best < len(currentSegment) {
+		pathSeq[0] = currentSegment[best:]
+	} else {
+		pathSeq = slices.Delete(pathSeq, 0, 1)
+	}
+
+	removed := remove(nodes, childIdx, pathSeq)
+	if !removed {
+		return false
+	}
+
+	n = &nodes[nodeIdx]
+	if nodes[childIdx].isEmpty() {
+		n.children = slices.Delete(n.children, closestIdx, closestIdx+1)
+		n.rebuildFingerprint(nodes)
+	}
+	n.hasParams = n.recomputeHasParams(nodes)
+
+	return true
 }

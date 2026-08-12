@@ -2,25 +2,15 @@ package gohttprouter
 
 import (
 	"net/http"
-	"slices"
 	"strings"
 )
 
 type Router struct {
-	nodes []node
-	roots [methodCount]nodePtr
+	nodes [methodCount][]node
 }
 
 func New() *Router {
-	r := &Router{
-		nodes: make([]node, 0, 64),
-	}
-
-	for i := range r.roots {
-		r.roots[i] = r.newNode()
-	}
-
-	return r
+	return &Router{}
 }
 
 func (r *Router) Add(method string, path string, handler Handler) {
@@ -31,19 +21,27 @@ func (r *Router) Add(method string, path string, handler Handler) {
 		panic(err)
 	}
 
-	methodIndex := methodToEnum(method)
-	if methodIndex == 255 {
+	m := methodToEnum(method)
+	if m == 255 {
 		return
 	}
 
-	r.insert(r.roots[methodIndex], pathSeq, handler)
+	if r.nodes[m] == nil {
+		r.nodes[m] = make([]node, 1)
+	}
+
+	insert(&r.nodes[m], 0, pathSeq, handler)
 }
 
 func (r *Router) Search(method string, path string, params *Params) Handler {
 	params.reset()
 
-	methodIndex := methodToEnum(method)
-	if methodIndex == 255 {
+	m := methodToEnum(method)
+	if m == 255 {
+		return nil
+	}
+
+	if r.nodes[m] == nil {
 		return nil
 	}
 
@@ -51,7 +49,7 @@ func (r *Router) Search(method string, path string, params *Params) Handler {
 		path = "/" + path
 	}
 
-	h := r.search(r.roots[methodIndex], path, 0, params)
+	h := search(r.nodes[m], 0, path, 0, params)
 	if h == nil {
 		params.reset()
 	}
@@ -67,96 +65,16 @@ func (r *Router) Remove(method string, path string) {
 		panic(err)
 	}
 
-	methodIndex := methodToEnum(method)
-	if methodIndex == 255 {
+	m := methodToEnum(method)
+	if m == 255 {
 		return
 	}
 
-	r.remove(r.roots[methodIndex], pathSeq)
-}
-
-func (r *Router) remove(nodeIdx nodePtr, pathSeq []string) bool {
-	if len(pathSeq) == 0 {
-		n := &r.nodes[nodeIdx]
-
-		if n.handler == nil {
-			return false
-		}
-
-		n.handler = nil
-		return true
+	if r.nodes[m] == nil {
+		return
 	}
 
-	currentSegment := pathSeq[0]
-	n := &r.nodes[nodeIdx]
-
-	if isParam(currentSegment) {
-		name := paramName(currentSegment)
-
-		for i := range n.wildcard {
-			if n.wildcard[i].name != name {
-				continue
-			}
-
-			childIdx := n.wildcard[i].node
-
-			removed := r.remove(childIdx, pathSeq[1:])
-			if !removed {
-				return false
-			}
-
-			n = &r.nodes[nodeIdx]
-			if r.nodes[childIdx].isEmpty() {
-				n.wildcard = slices.Delete(n.wildcard, i, i+1)
-			}
-			n.hasParams = n.recomputeHasParams(r)
-
-			return true
-		}
-
-		return false
-	}
-
-	closestIdx := -1
-	best := 0
-
-	for i := range n.children {
-		score := longestMatch(currentSegment, r.nodes[n.children[i]].prefix)
-		if score > best {
-			best = score
-			closestIdx = i
-		}
-	}
-
-	if closestIdx < 0 {
-		return false
-	}
-
-	childIdx := n.children[closestIdx]
-
-	if len(r.nodes[childIdx].prefix) > best {
-		return false
-	}
-
-	if best < len(currentSegment) {
-		pathSeq[0] = currentSegment[best:]
-	} else {
-		pathSeq = slices.Delete(pathSeq, 0, 1)
-	}
-
-	removed := r.remove(childIdx, pathSeq)
-	if !removed {
-		return false
-	}
-
-	n = &r.nodes[nodeIdx]
-	if r.nodes[childIdx].isEmpty() {
-		n.children = slices.Delete(n.children, closestIdx, closestIdx+1)
-		n.rebuildFingerprint(r)
-	}
-	n.hasParams = n.recomputeHasParams(r)
-
-	return true
+	remove(r.nodes[m], 0, pathSeq)
 }
 
 func (r *Router) GET(path string, handler Handler) {

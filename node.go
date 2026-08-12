@@ -88,22 +88,20 @@ func (r *Router) search(
 		child := &r.nodes[c]
 		pLen := len(child.prefix)
 
-		if pLen <= rem {
-			if path[idx:idx+pLen] == child.prefix {
-				var paramsIdx paramsIndex
+		if pLen <= rem && path[idx:idx+pLen] == child.prefix {
+			var paramsIdx paramsIndex
 
-				if child.hasParams {
-					paramsIdx = params.save()
-				}
+			if child.hasParams {
+				paramsIdx = params.save()
+			}
 
-				h := r.search(c, path, idx+pLen, params)
-				if h != nil {
-					return h
-				}
+			h := r.search(c, path, idx+pLen, params)
+			if h != nil {
+				return h
+			}
 
-				if child.hasParams {
-					params.restore(paramsIdx)
-				}
+			if child.hasParams {
+				params.restore(paramsIdx)
 			}
 		} else if pLen == rem+1 && child.prefix[pLen-1] == '/' &&
 			path[idx:] == child.prefix[:rem] {

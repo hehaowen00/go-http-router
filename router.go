@@ -2,6 +2,7 @@ package gohttprouter
 
 import (
 	"net/http"
+	"strings"
 )
 
 type Router struct {
@@ -43,6 +44,10 @@ func (r *Router) Search(method string, path string, params *Params) Handler {
 	methodIndex := methodToEnum(method)
 	if methodIndex == 255 {
 		return nil
+	}
+
+	if !strings.HasPrefix(path, "/") {
+		path = "/" + path
 	}
 
 	h := r.search(r.roots[methodIndex], path, 0, params)

@@ -24,6 +24,24 @@ func (n *node) rebuildFingerprint(r *Router) {
 	}
 }
 
+func (n *node) isEmpty() bool {
+	return n.handler == nil && len(n.children) == 0 && len(n.wildcard) == 0
+}
+
+func (n *node) recomputeHasParams(r *Router) bool {
+	if len(n.wildcard) > 0 {
+		return true
+	}
+
+	for _, c := range n.children {
+		if r.nodes[c].hasParams {
+			return true
+		}
+	}
+
+	return false
+}
+
 type wildcard struct {
 	name string
 	node nodePtr

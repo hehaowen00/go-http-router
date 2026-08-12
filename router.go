@@ -2,6 +2,7 @@ package gohttprouter
 
 import (
 	"net/http"
+	"slices"
 	"strings"
 )
 
@@ -59,7 +60,103 @@ func (r *Router) Search(method string, path string, params *Params) Handler {
 }
 
 func (r *Router) Remove(method string, path string) {
-	panic("unimplemented")
+	pathSeq := splitPath(path)
+
+	err := validateSeq(pathSeq)
+	if err != nil {
+		panic(err)
+	}
+
+	methodIndex := methodToEnum(method)
+	if methodIndex == 255 {
+		return
+	}
+
+	r.remove(r.roots[methodIndex], pathSeq)
+}
+
+func (r *Router) remove(nodeIdx nodePtr, pathSeq []string) bool {
+	if len(pathSeq) == 0 {
+		n := &r.nodes[nodeIdx]
+
+		if n.handler == nil {
+			return false
+		}
+
+		n.handler = nil
+		return true
+	}
+
+	currentSegment := pathSeq[0]
+	n := &r.nodes[nodeIdx]
+
+	if isParam(currentSegment) {
+		name := paramName(currentSegment)
+
+		for i := range n.wildcard {
+			if n.wildcard[i].name != name {
+				continue
+			}
+
+			childIdx := n.wildcard[i].node
+
+			removed := r.remove(childIdx, pathSeq[1:])
+			if !removed {
+				return false
+			}
+
+			n = &r.nodes[nodeIdx]
+			if r.nodes[childIdx].isEmpty() {
+				n.wildcard = slices.Delete(n.wildcard, i, i+1)
+			}
+			n.hasParams = n.recomputeHasParams(r)
+
+			return true
+		}
+
+		return false
+	}
+
+	closestIdx := -1
+	best := 0
+
+	for i := range n.children {
+		score := longestMatch(currentSegment, r.nodes[n.children[i]].prefix)
+		if score > best {
+			best = score
+			closestIdx = i
+		}
+	}
+
+	if closestIdx < 0 {
+		return false
+	}
+
+	childIdx := n.children[closestIdx]
+
+	if len(r.nodes[childIdx].prefix) > best {
+		return false
+	}
+
+	if best < len(currentSegment) {
+		pathSeq[0] = currentSegment[best:]
+	} else {
+		pathSeq = slices.Delete(pathSeq, 0, 1)
+	}
+
+	removed := r.remove(childIdx, pathSeq)
+	if !removed {
+		return false
+	}
+
+	n = &r.nodes[nodeIdx]
+	if r.nodes[childIdx].isEmpty() {
+		n.children = slices.Delete(n.children, closestIdx, closestIdx+1)
+		n.rebuildFingerprint(r)
+	}
+	n.hasParams = n.recomputeHasParams(r)
+
+	return true
 }
 
 func (r *Router) GET(path string, handler Handler) {

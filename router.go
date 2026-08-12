@@ -6,7 +6,7 @@ import (
 
 type Router struct {
 	nodes []node
-	root  int32
+	root  nodePtr
 }
 
 func New() *Router {
@@ -26,13 +26,23 @@ func (r *Router) Add(method string, path string, handler Handler) {
 		panic(err)
 	}
 
-	r.insert(r.root, method, pathSeq, handler)
+	methodIndex := methodToIndex(method)
+	if methodIndex == 255 {
+		return
+	}
+
+	r.insert(r.root, methodIndex, pathSeq, handler)
 }
 
 func (r *Router) Search(method string, path string, params *Params) Handler {
 	params.clear()
 
-	h := r.search(r.root, method, path, 0, params)
+	methodIndex := methodToIndex(method)
+	if methodIndex == 255 {
+		return nil
+	}
+
+	h := r.search(r.root, methodIndex, path, 0, params)
 	if h == nil {
 		params.clear()
 	}

@@ -12,6 +12,16 @@ type Handler interface {
 	Handle(c Context)
 }
 
+type HandlerFunc func(c Context)
+
+func (h HandlerFunc) Handle(c Context) {
+	h(c)
+}
+
+func NewHandlerFunc(handler func(c Context)) Handler {
+	return HandlerFunc(handler)
+}
+
 type Context struct {
 	ctx    context.Context
 	req    *http.Request

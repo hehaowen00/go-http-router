@@ -1,16 +1,17 @@
 package gohttprouter
 
 import (
-	"net/http"
 	"slices"
 	"strings"
 )
+
+type nodePtr int32
 
 type node struct {
 	prefix      string
 	handlers    methodHandler
 	fingerprint []byte
-	children    []int32
+	children    []nodePtr
 	wildcard    []wildcard
 }
 
@@ -24,15 +25,15 @@ func (n *node) rebuildFingerprint(r *Router) {
 
 type wildcard struct {
 	name string
-	node int32
+	node nodePtr
 }
 
-func (r *Router) newNode() int32 {
+func (r *Router) newNode() nodePtr {
 	r.nodes = append(r.nodes, node{})
-	return int32(len(r.nodes) - 1)
+	return nodePtr(len(r.nodes) - 1)
 }
 
-func (r *Router) getWildcard(idx int32, name string) int32 {
+func (r *Router) getWildcard(idx nodePtr, name string) int32 {
 	n := &r.nodes[idx]
 
 	for i := range n.wildcard {
@@ -53,8 +54,8 @@ func (r *Router) getWildcard(idx int32, name string) int32 {
 }
 
 func (r *Router) search(
-	idx int32,
-	method string,
+	idx nodePtr,
+	method methodIndex,
 	path string,
 	i int,
 	params *Params,
@@ -83,7 +84,13 @@ func (r *Router) search(
 			child := &r.nodes[c]
 
 			if b == n.fingerprint[j] && hasPrefixAt(path, i, child.prefix) {
-				h := r.search(c, method, path, i+len(child.prefix), params)
+				h := r.search(
+					nodePtr(c),
+					method,
+					path,
+					i+len(child.prefix),
+					params,
+				)
 				if h != nil {
 					return h
 				}
@@ -120,7 +127,13 @@ func (r *Router) search(
 		wc := &n.wildcard[wi]
 		params.set(wc.name, value)
 
-		h := r.search(wc.node, method, path, segmentStart+segmentEnd, params)
+		h := r.search(
+			nodePtr(wc.node),
+			method,
+			path,
+			segmentStart+segmentEnd,
+			params,
+		)
 		if h != nil {
 			return h
 		}
@@ -130,24 +143,24 @@ func (r *Router) search(
 }
 
 func (r *Router) insert(
-	idx int32,
-	method string,
+	nodeIdx nodePtr,
+	method methodIndex,
 	pathSeq []string,
 	handler Handler,
 ) {
 	if len(pathSeq) == 0 {
-		r.nodes[idx].handlers.Insert(method, handler)
+		r.nodes[nodeIdx].handlers.Insert(method, handler)
 		return
 	}
 
 	currentSegment := pathSeq[0]
-	n := &r.nodes[idx]
+	n := &r.nodes[nodeIdx]
 
 	if isParam(currentSegment) {
 		name := paramName(currentSegment)
 
-		wildcardIdx := r.getWildcard(idx, name)
-		n = &r.nodes[idx]
+		wildcardIdx := r.getWildcard(nodeIdx, name)
+		n = &r.nodes[nodeIdx]
 
 		pathSeq = slices.Delete(pathSeq, 0, 1)
 		r.insert(n.wildcard[wildcardIdx].node, method, pathSeq, handler)
@@ -171,7 +184,7 @@ func (r *Router) insert(
 		r.nodes[childIdx].prefix = currentSegment
 		r.insert(childIdx, method, slices.Delete(pathSeq, 0, 1), handler)
 
-		n = &r.nodes[idx]
+		n = &r.nodes[nodeIdx]
 		n.children = append(n.children, childIdx)
 		n.rebuildFingerprint(r)
 
@@ -193,7 +206,7 @@ func (r *Router) insert(
 
 	if len(closest.prefix) > best {
 		newChildIdx := r.newNode()
-		n = &r.nodes[idx]
+		n = &r.nodes[nodeIdx]
 		closest = &r.nodes[n.children[closestIdx]]
 
 		newChild := &r.nodes[newChildIdx]
@@ -212,89 +225,4 @@ func (r *Router) insert(
 
 		r.insert(newChildIdx, method, pathSeq, handler)
 	}
-}
-
-type methodHandler struct {
-	get     Handler
-	query   Handler
-	post    Handler
-	patch   Handler
-	put     Handler
-	delete  Handler
-	connect Handler
-	options Handler
-	head    Handler
-	count   int
-}
-
-func (h *methodHandler) Len() int {
-	return h.count
-}
-
-func (h *methodHandler) Get(method string) Handler {
-	switch method {
-	case http.MethodGet:
-		return h.get
-	case http.MethodPost:
-		return h.post
-	case http.MethodPatch:
-		return h.patch
-	case http.MethodPut:
-		return h.put
-	case http.MethodDelete:
-		return h.delete
-	case http.MethodConnect:
-		return h.connect
-	case http.MethodOptions:
-		return h.options
-	case http.MethodHead:
-		return h.head
-	default:
-		return nil
-	}
-}
-
-func (h *methodHandler) Insert(method string, handler Handler) {
-	h.set(method, handler)
-}
-
-func (h *methodHandler) Remove(method string) bool {
-	return h.set(method, nil)
-}
-
-func (h *methodHandler) set(method string, handler Handler) bool {
-	var target *Handler
-
-	switch method {
-	case http.MethodGet:
-		target = &h.get
-	case http.MethodPost:
-		target = &h.post
-	case http.MethodPatch:
-		target = &h.patch
-	case http.MethodPut:
-		target = &h.put
-	case http.MethodDelete:
-		target = &h.delete
-	case http.MethodConnect:
-		target = &h.connect
-	case http.MethodOptions:
-		target = &h.options
-	case http.MethodHead:
-		target = &h.head
-	default:
-		return false
-	}
-
-	if *target != nil && handler == nil {
-		*target = handler
-		h.count--
-		return true
-	} else if *target == nil && handler != nil {
-		*target = handler
-		h.count++
-		return true
-	}
-
-	return false
 }

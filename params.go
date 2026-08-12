@@ -31,6 +31,10 @@ func (p *Params) set(key string, value string) {
 }
 
 func (p *Params) clear() {
+	p.idx = 0
+}
+
+func (p *Params) reset() {
 	clear(p.entries[:p.idx])
 	p.idx = 0
 }

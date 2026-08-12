@@ -6,10 +6,19 @@ import (
 )
 
 type node struct {
-	prefix   string
-	handlers methodHandler
-	children []int32
-	wildcard []wildcard
+	prefix      string
+	handlers    methodHandler
+	fingerprint []byte
+	children    []int32
+	wildcard    []wildcard
+}
+
+func (n *node) rebuildFingerprint(r *Router) {
+	n.fingerprint = n.fingerprint[:0]
+
+	for _, c := range n.children {
+		n.fingerprint = append(n.fingerprint, r.nodes[c].prefix[0])
+	}
 }
 
 type wildcard struct {
@@ -69,9 +78,9 @@ func (r *Router) search(
 		b := path[i]
 		rem := len(path) - i
 
-		for _, c := range n.children {
+		for j, c := range n.children {
 			child := &r.nodes[c]
-			if b == child.prefix[0] && hasPrefixAt(path, i, child.prefix) {
+			if b == n.fingerprint[j] && hasPrefixAt(path, i, child.prefix) {
 				h := r.search(c, method, path, i+len(child.prefix), params)
 				if h != nil {
 					return h
@@ -165,6 +174,7 @@ func (r *Router) insert(
 
 		n = &r.nodes[idx]
 		n.children = append(n.children, childIdx)
+		n.rebuildFingerprint(r)
 
 		return
 	}
@@ -178,6 +188,7 @@ func (r *Router) insert(
 		}
 
 		r.insert(n.children[closestIdx], method, pathSeq, handler)
+
 		return
 	}
 
@@ -192,6 +203,7 @@ func (r *Router) insert(
 		newChild.children = append(newChild.children, n.children[closestIdx])
 
 		n.children[closestIdx] = newChildIdx
+		n.rebuildFingerprint(r)
 
 		if best >= len(currentSegment) {
 			pathSeq = slices.Delete(pathSeq, 0, 1)

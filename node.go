@@ -9,29 +9,57 @@ import (
 type node struct {
 	prefix   string
 	handlers methodHandler
-	children []*node
-	wildcard []*wildcard
-	param    string
+	children []int32
+	wildcard []wildcard
 }
 
 type wildcard struct {
 	name string
-	node *node
+	node int32
 }
 
-func newNode() *node {
-	return &node{}
+func (r *Router) newNode() int32 {
+	r.nodes = append(r.nodes, node{})
+	return int32(len(r.nodes) - 1)
 }
 
-func (n *node) Search(method string, path string, i int, params *Params) Handler {
+func (r *Router) getWildcard(idx int32, name string) int32 {
+	n := &r.nodes[idx]
+
+	for i := range n.wildcard {
+		if n.wildcard[i].name == name {
+			return int32(i)
+		}
+	}
+
+	childIdx := r.newNode()
+	n = &r.nodes[idx]
+
+	n.wildcard = append(n.wildcard, wildcard{
+		name: name,
+		node: childIdx,
+	})
+
+	return int32(len(n.wildcard) - 1)
+}
+
+func (r *Router) search(
+	idx int32,
+	method string,
+	path string,
+	i int,
+	params *Params,
+) Handler {
+	n := &r.nodes[idx]
+
 	if i == len(path) || (i == len(path)-1 && path[i] == '/') {
 		if h := n.handlers.Get(method); h != nil {
 			return h
 		}
 
-		for _, child := range n.children {
-			if child.prefix == "/" {
-				return child.handlers.Get(method)
+		for _, c := range n.children {
+			if r.nodes[c].prefix == "/" {
+				return r.nodes[c].handlers.Get(method)
 			}
 		}
 
@@ -40,10 +68,12 @@ func (n *node) Search(method string, path string, i int, params *Params) Handler
 
 	if i < len(path) {
 		b := path[i]
+		rem := len(path) - i
 
-		for _, child := range n.children {
+		for _, c := range n.children {
+			child := &r.nodes[c]
 			if b == child.prefix[0] && hasPrefixAt(path, i, child.prefix) {
-				h := child.Search(method, path, i+len(child.prefix), params)
+				h := r.search(c, method, path, i+len(child.prefix), params)
 				if h != nil {
 					return h
 				}
@@ -51,7 +81,7 @@ func (n *node) Search(method string, path string, i int, params *Params) Handler
 				break
 			}
 
-			if leafMatch(path[i:], child.prefix) {
+			if len(child.prefix) > rem && leafMatch(path[i:], child.prefix) {
 				return child.handlers.Get(method)
 			}
 		}
@@ -66,17 +96,18 @@ func (n *node) Search(method string, path string, i int, params *Params) Handler
 		segmentStart++
 	}
 
-	idx := strings.IndexAny(path[segmentStart:], "/")
-	if idx == -1 {
-		idx = len(path) - segmentStart
+	segmentEnd := strings.IndexAny(path[segmentStart:], "/")
+	if segmentEnd == -1 {
+		segmentEnd = len(path) - segmentStart
 	}
 
-	value := path[segmentStart : segmentStart+idx]
+	value := path[segmentStart : segmentStart+segmentEnd]
 
-	for _, wc := range n.wildcard {
+	for wi := range n.wildcard {
+		wc := &n.wildcard[wi]
 		params.set(wc.name, value)
 
-		h := wc.node.Search(method, path, segmentStart+idx, params)
+		h := r.search(wc.node, method, path, segmentStart+segmentEnd, params)
 		if h != nil {
 			return h
 		}
@@ -85,54 +116,55 @@ func (n *node) Search(method string, path string, i int, params *Params) Handler
 	return nil
 }
 
-func (n *node) Insert(method string, pathSeq []string, handler Handler) {
+func (r *Router) insert(
+	idx int32,
+	method string,
+	pathSeq []string,
+	handler Handler,
+) {
 	if len(pathSeq) == 0 {
-		n.handlers.Insert(method, handler)
+		r.nodes[idx].handlers.Insert(method, handler)
 		return
 	}
 
 	currentSegment := pathSeq[0]
+	n := &r.nodes[idx]
 
 	if isParam(currentSegment) {
 		name := paramName(currentSegment)
 
-		i := n.getWildcard(name)
-		pathSeq = slices.Delete(pathSeq, 0, 1)
+		wildcardIdx := r.getWildcard(idx, name)
+		n = &r.nodes[idx]
 
-		wildcardNode := n.wildcard[i]
-		wildcardNode.node.Insert(method, pathSeq, handler)
+		pathSeq = slices.Delete(pathSeq, 0, 1)
+		r.insert(n.wildcard[wildcardIdx].node, method, pathSeq, handler)
 
 		return
 	}
 
-	shortestIdx := -1
+	closestIdx := -1
 	best := 0
 
 	for i := range n.children {
-		score := longestMatch(currentSegment, n.children[i].prefix)
+		score := longestMatch(currentSegment, r.nodes[n.children[i]].prefix)
 		if score > best {
 			best = score
-			shortestIdx = i
+			closestIdx = i
 		}
 	}
 
-	if shortestIdx < 0 {
-		pathSeq = slices.Delete(pathSeq, 0, 1)
+	if closestIdx < 0 {
+		childIdx := r.newNode()
+		r.nodes[childIdx].prefix = currentSegment
+		r.insert(childIdx, method, slices.Delete(pathSeq, 0, 1), handler)
 
-		if !isParam(currentSegment) {
-			childNode := newNode()
-			childNode.prefix = currentSegment
-			childNode.Insert(method, pathSeq, handler)
-			n.children = append(n.children, childNode)
-		} else {
-			i := n.getWildcard(currentSegment)
-			n.wildcard[i].node.Insert(method, pathSeq, handler)
-		}
+		n = &r.nodes[idx]
+		n.children = append(n.children, childIdx)
 
 		return
 	}
 
-	closest := n.children[shortestIdx]
+	closest := &r.nodes[n.children[closestIdx]]
 	if len(closest.prefix) == best {
 		if best == len(pathSeq[0]) {
 			pathSeq = slices.Delete(pathSeq, 0, 1)
@@ -140,16 +172,21 @@ func (n *node) Insert(method string, pathSeq []string, handler Handler) {
 			pathSeq[0] = pathSeq[0][best:]
 		}
 
-		closest.Insert(method, pathSeq, handler)
+		r.insert(n.children[closestIdx], method, pathSeq, handler)
+		return
 	}
 
 	if len(closest.prefix) > best {
-		newChild := newNode()
+		newChildIdx := r.newNode()
+		n = &r.nodes[idx]
+		closest = &r.nodes[n.children[closestIdx]]
+
+		newChild := &r.nodes[newChildIdx]
 		newChild.prefix = closest.prefix[:best]
 		closest.prefix = closest.prefix[best:]
-		newChild.children = append(newChild.children, closest)
+		newChild.children = append(newChild.children, n.children[closestIdx])
 
-		n.children[shortestIdx] = newChild
+		n.children[closestIdx] = newChildIdx
 
 		if best >= len(currentSegment) {
 			pathSeq = slices.Delete(pathSeq, 0, 1)
@@ -157,23 +194,8 @@ func (n *node) Insert(method string, pathSeq []string, handler Handler) {
 			pathSeq[0] = pathSeq[0][best:]
 		}
 
-		newChild.Insert(method, pathSeq, handler)
+		r.insert(newChildIdx, method, pathSeq, handler)
 	}
-}
-
-func (n *node) getWildcard(name string) int {
-	for i := range n.wildcard {
-		if n.wildcard[i].name == name {
-			return i
-		}
-	}
-
-	n.wildcard = append(n.wildcard, &wildcard{
-		name: name,
-		node: newNode(),
-	})
-
-	return len(n.wildcard) - 1
 }
 
 type methodHandler struct {

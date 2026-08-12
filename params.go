@@ -31,8 +31,6 @@ func (p *Params) set(key string, value string) {
 }
 
 func (p *Params) clear() {
-	for i := range p.entries {
-		p.entries[i] = param{}
-	}
+	clear(p.entries[:p.idx])
 	p.idx = 0
 }

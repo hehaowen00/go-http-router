@@ -7,9 +7,11 @@ import (
 
 type nodePtr int32
 
+type handlerPtr int32
+
 type node struct {
 	prefix      string
-	handlers    methodHandler
+	handler     handlerPtr
 	fingerprint []byte
 	children    []nodePtr
 	wildcard    []wildcard
@@ -29,8 +31,16 @@ type wildcard struct {
 }
 
 func (r *Router) newNode() nodePtr {
-	r.nodes = append(r.nodes, node{})
+	r.nodes = append(r.nodes, node{
+		handler: r.newHandler(),
+	})
+
 	return nodePtr(len(r.nodes) - 1)
+}
+
+func (r *Router) newHandler() handlerPtr {
+	r.handlers = append(r.handlers, methodHandler{})
+	return handlerPtr(len(r.handlers) - 1)
 }
 
 func (r *Router) getWildcard(idx nodePtr, name string) int32 {
@@ -63,13 +73,13 @@ func (r *Router) search(
 	n := &r.nodes[idx]
 
 	if i == len(path) || (i == len(path)-1 && path[i] == '/') {
-		if h := n.handlers.Get(method); h != nil {
+		if h := r.handlers[n.handler].Get(method); h != nil {
 			return h
 		}
 
 		for _, c := range n.children {
 			if r.nodes[c].prefix == "/" {
-				return r.nodes[c].handlers.Get(method)
+				return r.handlers[r.nodes[c].handler].Get(method)
 			}
 		}
 
@@ -96,7 +106,7 @@ func (r *Router) search(
 			}
 
 			if len(child.prefix) > rem && leafMatch(path[i:], child.prefix) {
-				h := child.handlers.Get(method)
+				h := r.handlers[child.handler].Get(method)
 				if h != nil {
 					return h
 				}
@@ -150,7 +160,7 @@ func (r *Router) insert(
 	handler Handler,
 ) {
 	if len(pathSeq) == 0 {
-		r.nodes[nodeIdx].handlers.Insert(method, handler)
+		r.handlers[r.nodes[nodeIdx].handler].Insert(method, handler)
 		return
 	}
 

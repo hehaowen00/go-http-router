@@ -5,8 +5,9 @@ import (
 )
 
 type Router struct {
-	nodes []node
-	root  nodePtr
+	nodes    []node
+	handlers []methodHandler
+	root     nodePtr
 }
 
 func New() *Router {

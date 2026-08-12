@@ -106,7 +106,7 @@ func TestRouter(t *testing.T) {
 		r.GET(route, dummyHandler{})
 	}
 
-	inspect.Inspect(r)
+	// inspect.Inspect(r)
 
 	params := Params{}
 

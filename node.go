@@ -80,6 +80,7 @@ func (r *Router) search(
 
 		for j, c := range n.children {
 			child := &r.nodes[c]
+
 			if b == n.fingerprint[j] && hasPrefixAt(path, i, child.prefix) {
 				h := r.search(c, method, path, i+len(child.prefix), params)
 				if h != nil {
@@ -90,7 +91,10 @@ func (r *Router) search(
 			}
 
 			if len(child.prefix) > rem && leafMatch(path[i:], child.prefix) {
-				return child.handlers.Get(method)
+				h := child.handlers.Get(method)
+				if h != nil {
+					return h
+				}
 			}
 		}
 	}

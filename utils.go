@@ -61,6 +61,10 @@ func splitPath(path string) []string {
 		path = strings.TrimSuffix(path, "/")
 	}
 
+	if path == "" {
+		return []string{"/"}
+	}
+
 	path = strings.ReplaceAll(path, "//", "/")
 	xs := strings.Split(path, "/")
 
@@ -110,14 +114,4 @@ func validateSeq(xs []string) error {
 	return nil
 }
 
-func leafMatch(pathSeq, prefix string) bool {
-	if len(prefix) == 0 || prefix[len(prefix)-1] != '/' {
-		return false
-	}
 
-	return len(pathSeq)+1 == len(prefix) && pathSeq == prefix[:len(prefix)-1]
-}
-
-func hasPrefixAt(path string, i int, prefix string) bool {
-	return len(prefix) <= len(path)-i && path[i:i+len(prefix)] == prefix
-}

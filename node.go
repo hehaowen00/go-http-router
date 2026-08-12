@@ -55,7 +55,7 @@ func (r *Router) getWildcard(idx nodePtr, name string) int32 {
 
 func (r *Router) search(
 	idx nodePtr,
-	method methodIndex,
+	method methodEnum,
 	path string,
 	i int,
 	params *Params,
@@ -84,17 +84,14 @@ func (r *Router) search(
 			child := &r.nodes[c]
 
 			if b == n.fingerprint[j] && hasPrefixAt(path, i, child.prefix) {
-				h := r.search(
-					nodePtr(c),
-					method,
-					path,
-					i+len(child.prefix),
-					params,
-				)
+				paramsIdx := params.save()
+
+				h := r.search(c, method, path, i+len(child.prefix), params)
 				if h != nil {
 					return h
 				}
 
+				params.restore(paramsIdx)
 				break
 			}
 
@@ -124,6 +121,8 @@ func (r *Router) search(
 	value := path[segmentStart : segmentStart+segmentEnd]
 
 	for wi := range n.wildcard {
+		paramsIdx := params.save()
+
 		wc := &n.wildcard[wi]
 		params.set(wc.name, value)
 
@@ -137,6 +136,8 @@ func (r *Router) search(
 		if h != nil {
 			return h
 		}
+
+		params.restore(paramsIdx)
 	}
 
 	return nil
@@ -144,7 +145,7 @@ func (r *Router) search(
 
 func (r *Router) insert(
 	nodeIdx nodePtr,
-	method methodIndex,
+	method methodEnum,
 	pathSeq []string,
 	handler Handler,
 ) {

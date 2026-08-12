@@ -189,6 +189,23 @@ func BenchmarkRouterGithub(b *testing.B) {
 	params := Params{}
 
 	for i := 0; b.Loop(); i++ {
+		route := githubAPI[i%len(githubAPI)]
+		handler := r.Search(route[0], route[1], &params)
+		if handler == nil {
+			b.Fatalf("route not found: %s %s", route[0], route[1])
+		}
+	}
+}
+
+func BenchmarkRouterGithubAll(b *testing.B) {
+	r := New()
+	for _, route := range githubAPI {
+		r.Add(route[0], route[1], dummyHandler{})
+	}
+
+	params := Params{}
+
+	for i := 0; b.Loop(); i++ {
 		for _, route := range githubAPI {
 			handler := r.Search(route[0], route[1], &params)
 			if handler == nil {

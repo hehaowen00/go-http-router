@@ -2,10 +2,10 @@ package gohttprouter
 
 import "net/http"
 
-type methodIndex int
+type methodEnum int
 
 const (
-	methodGet methodIndex = iota
+	methodGet methodEnum = iota
 	methodQuery
 	methodPost
 	methodPatch
@@ -17,7 +17,7 @@ const (
 	methodCount
 )
 
-func methodToIndex(method string) methodIndex {
+func methodToEnum(method string) methodEnum {
 	switch method {
 	case http.MethodGet:
 		return methodGet
@@ -51,11 +51,11 @@ func (h *methodHandler) Len() int {
 	return h.count
 }
 
-func (h *methodHandler) Get(method methodIndex) Handler {
+func (h *methodHandler) Get(method methodEnum) Handler {
 	return h.handlers[method]
 }
 
-func (h *methodHandler) Insert(method methodIndex, handler Handler) {
+func (h *methodHandler) Insert(method methodEnum, handler Handler) {
 	if h.handlers[method] == nil {
 		h.count++
 	}
@@ -63,7 +63,7 @@ func (h *methodHandler) Insert(method methodIndex, handler Handler) {
 	h.handlers[method] = handler
 }
 
-func (h *methodHandler) Remove(method methodIndex) bool {
+func (h *methodHandler) Remove(method methodEnum) bool {
 	v := h.handlers[method] != nil
 	if v {
 		h.count--

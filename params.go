@@ -2,8 +2,10 @@ package gohttprouter
 
 type Params struct {
 	entries [32]param
-	idx     int
+	idx     paramsIndex
 }
+
+type paramsIndex int
 
 type param struct {
 	key   string
@@ -32,6 +34,15 @@ func (p *Params) set(key string, value string) {
 
 func (p *Params) clear() {
 	p.idx = 0
+}
+
+func (p *Params) save() paramsIndex {
+	return p.idx
+}
+
+func (p *Params) restore(idx paramsIndex) {
+	clear(p.entries[idx:p.idx])
+	p.idx = idx
 }
 
 func (p *Params) reset() {

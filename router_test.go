@@ -24,7 +24,7 @@ func TestHandlersCount(t *testing.T) {
 		t.Fatalf("empty handlers: count = %d, want 0", got)
 	}
 
-	h.Insert(methodToIndex(http.MethodGet), dummyHandler{})
+	h.Insert(methodToEnum(http.MethodGet), dummyHandler{})
 
 	if got := h.count; got != 1 {
 		t.Fatalf("after GET: count = %d, want 1", got)
@@ -37,19 +37,19 @@ func TestHandlersCount(t *testing.T) {
 		http.MethodConnect,
 		http.MethodOptions,
 	} {
-		h.Insert(methodToIndex(m), dummyHandler{})
+		h.Insert(methodToEnum(m), dummyHandler{})
 	}
 
 	if got := h.count; got != 6 {
 		t.Fatalf("all six methods: count = %d, want 6", got)
 	}
 
-	h.Insert(methodToIndex(http.MethodGet), dummyHandler{})
+	h.Insert(methodToEnum(http.MethodGet), dummyHandler{})
 	if got := h.count; got != 6 {
 		t.Fatalf("after re-setting GET: count = %d, want 6", got)
 	}
 
-	handler := h.Get(methodToIndex(http.MethodPatch))
+	handler := h.Get(methodToEnum(http.MethodPatch))
 	if handler != nil {
 		t.Fatalf("expected nil for PATCH, got %v", handler)
 	}

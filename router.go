@@ -26,7 +26,7 @@ func (r *Router) Add(method string, path string, handler Handler) {
 		panic(err)
 	}
 
-	methodIndex := methodToIndex(method)
+	methodIndex := methodToEnum(method)
 	if methodIndex == 255 {
 		return
 	}
@@ -37,7 +37,7 @@ func (r *Router) Add(method string, path string, handler Handler) {
 func (r *Router) Search(method string, path string, params *Params) Handler {
 	params.clear()
 
-	methodIndex := methodToIndex(method)
+	methodIndex := methodToEnum(method)
 	if methodIndex == 255 {
 		return nil
 	}

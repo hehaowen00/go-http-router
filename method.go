@@ -42,6 +42,8 @@ func methodToEnum(method string) methodEnum {
 	}
 }
 
+type methodMask uint16
+
 type methodHandler struct {
 	handlers [9]Handler
 	count    int
@@ -55,12 +57,16 @@ func (h *methodHandler) Get(method methodEnum) Handler {
 	return h.handlers[method]
 }
 
-func (h *methodHandler) Insert(method methodEnum, handler Handler) {
+func (h *methodHandler) Insert(method methodEnum, handler Handler) bool {
 	if h.handlers[method] == nil {
 		h.count++
+		h.handlers[method] = handler
+		return true
 	}
 
 	h.handlers[method] = handler
+
+	return false
 }
 
 func (h *methodHandler) Remove(method methodEnum) bool {

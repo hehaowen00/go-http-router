@@ -47,7 +47,7 @@ func longestMatch(left, right string) int {
 		}
 	}
 
-	return i + 1
+	return l
 }
 
 func splitPath(path string) []string {
@@ -113,5 +113,3 @@ func validateSeq(xs []string) error {
 
 	return nil
 }
-
-

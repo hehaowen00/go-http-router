@@ -1,9 +1,6 @@
 package gohttprouter
 
-import (
-	"net/http"
-	"strings"
-)
+import "strings"
 
 type Router struct {
 	nodes [methodCount][]node
@@ -75,36 +72,4 @@ func (r *Router) Remove(method string, path string) {
 	}
 
 	remove(r.nodes[m], 0, pathSeq)
-}
-
-func (r *Router) GET(path string, handler Handler) {
-	r.Add(http.MethodGet, path, handler)
-}
-
-func (r *Router) QUERY(path string, handler Handler) {
-	r.Add("QUERY", path, handler)
-}
-
-func (r *Router) POST(path string, handler Handler) {
-	r.Add(http.MethodPost, path, handler)
-}
-
-func (r *Router) PUT(path string, handler Handler) {
-	r.Add(http.MethodPut, path, handler)
-}
-
-func (r *Router) DELETE(path string, handler Handler) {
-	r.Add(http.MethodDelete, path, handler)
-}
-
-func (r *Router) CONNECT(path string, handler Handler) {
-	r.Add(http.MethodConnect, path, handler)
-}
-
-func (r *Router) OPTIONS(path string, handler Handler) {
-	r.Add(http.MethodOptions, path, handler)
-}
-
-func (r *Router) HEAD(path string, handler Handler) {
-	r.Add(http.MethodHead, path, handler)
 }

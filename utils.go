@@ -1,10 +1,7 @@
 package gohttprouter
 
 import (
-	"context"
-	"encoding/json"
 	"fmt"
-	"net/http"
 	"strings"
 )
 
@@ -20,22 +17,6 @@ func (h HandlerFunc) Handle(c Context) {
 
 func NewHandlerFunc(handler func(c Context)) Handler {
 	return HandlerFunc(handler)
-}
-
-type Context struct {
-	ctx    context.Context
-	req    *http.Request
-	params *Params
-	w      http.ResponseWriter
-}
-
-func (c *Context) Write(status int, data []byte) (int, error) {
-	return c.w.Write(data)
-}
-
-func (c *Context) WriteJSON(status int, v any) error {
-	c.w.WriteHeader(status)
-	return json.NewEncoder(c.w).Encode(v)
 }
 
 func isParam(segment string) bool {

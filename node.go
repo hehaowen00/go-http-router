@@ -22,12 +22,12 @@ type catchAll struct {
 	node nodePtr
 }
 
-func (n *node[T]) rebuildFingerprint(nodes []node[T]) {
-	n.fingerprint = n.fingerprint[:0]
-
-	for _, c := range n.children {
-		n.fingerprint = append(n.fingerprint, nodes[c].prefix[0])
+func (n *node[T]) appendFingerprint(b byte) {
+	if cap(n.fingerprint) == 0 {
+		n.fingerprint = make([]byte, 0, 4)
 	}
+
+	n.fingerprint = append(n.fingerprint, b)
 }
 
 func (n *node[T]) isEmpty() bool {
@@ -144,6 +144,10 @@ func search[T any](
 		return nil
 	}
 
+	if len(n.wildcard) == 0 && n.catchAll == nil {
+		return nil
+	}
+
 	segmentStart := idx
 	if path[segmentStart] == '/' {
 		segmentStart++
@@ -156,7 +160,21 @@ func search[T any](
 
 	value := path[segmentStart : segmentStart+segmentEnd]
 
-	for wi := range n.wildcard {
+	if len(n.wildcard) == 1 && n.catchAll == nil {
+		wc := &n.wildcard[0]
+		params.set(wc.name, value)
+
+		h := search(
+			nodes,
+			nodePtr(wc.node),
+			path,
+			segmentStart+segmentEnd,
+			params,
+		)
+		return h
+	}
+
+	for wi := 0; wi < len(n.wildcard); wi++ {
 		paramsIdx := params.save()
 
 		wc := &n.wildcard[wi]
@@ -228,7 +246,7 @@ func insert[T any](
 		wildcardIdx, created := getWildcard(nodes, nodeIdx, name)
 		n = &(*nodes)[nodeIdx]
 
-		pathSeq = slices.Delete(pathSeq, 0, 1)
+		pathSeq = pathSeq[1:]
 		newParam = insert(
 			nodes,
 			n.wildcard[wildcardIdx].node,
@@ -262,13 +280,13 @@ func insert[T any](
 		newParam = insert(
 			nodes,
 			childIdx,
-			slices.Delete(pathSeq, 0, 1),
+			pathSeq[1:],
 			handler,
 		)
 
 		n = &(*nodes)[nodeIdx]
 		n.children = append(n.children, childIdx)
-		n.rebuildFingerprint(*nodes)
+		n.appendFingerprint((*nodes)[childIdx].prefix[0])
 
 		if newParam {
 			n.hasParams = true
@@ -280,7 +298,7 @@ func insert[T any](
 	closest := &(*nodes)[n.children[closestIdx]]
 	if len(closest.prefix) == best {
 		if best == len(pathSeq[0]) {
-			pathSeq = slices.Delete(pathSeq, 0, 1)
+			pathSeq = pathSeq[1:]
 		} else {
 			pathSeq[0] = pathSeq[0][best:]
 		}
@@ -309,13 +327,12 @@ func insert[T any](
 		newChild.hasParams = closest.hasParams
 		closest.prefix = closest.prefix[best:]
 		newChild.children = append(newChild.children, n.children[closestIdx])
-		newChild.rebuildFingerprint(*nodes)
+		newChild.appendFingerprint(closest.prefix[0])
 
 		n.children[closestIdx] = newChildIdx
-		n.rebuildFingerprint(*nodes)
 
 		if best >= len(currentSegment) {
-			pathSeq = slices.Delete(pathSeq, 0, 1)
+			pathSeq = pathSeq[1:]
 		} else {
 			pathSeq[0] = pathSeq[0][best:]
 		}
@@ -413,7 +430,7 @@ func remove[T any](nodes []node[T], nodeIdx nodePtr, pathSeq []string) bool {
 	if best < len(currentSegment) {
 		pathSeq[0] = currentSegment[best:]
 	} else {
-		pathSeq = slices.Delete(pathSeq, 0, 1)
+		pathSeq = pathSeq[1:]
 	}
 
 	removed := remove(nodes, childIdx, pathSeq)
@@ -425,7 +442,7 @@ func remove[T any](nodes []node[T], nodeIdx nodePtr, pathSeq []string) bool {
 
 	if nodes[childIdx].isEmpty() {
 		n.children = slices.Delete(n.children, closestIdx, closestIdx+1)
-		n.rebuildFingerprint(nodes)
+		n.fingerprint = slices.Delete(n.fingerprint, closestIdx, closestIdx+1)
 	}
 
 	n.hasParams = n.recomputeHasParams(nodes)

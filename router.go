@@ -27,7 +27,7 @@ func (r *Router[T]) Add(method string, path string, handler T) error {
 	}
 
 	if r.nodes[m] == nil {
-		r.nodes[m] = make([]node[T], 1)
+		r.nodes[m] = make([]node[T], 1, 64)
 	}
 
 	insert(&r.nodes[m], 0, sequence, handler)

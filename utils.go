@@ -56,45 +56,62 @@ func longestMatch(left, right string) int {
 func splitPath(path string) []string {
 	path = strings.TrimSpace(path)
 
-	for strings.HasPrefix(path, "/") {
-		path = strings.TrimPrefix(path, "/")
+	i := 0
+	for i < len(path) && path[i] == '/' {
+		i++
 	}
 
-	for strings.HasSuffix(path, "/") {
-		path = strings.TrimSuffix(path, "/")
+	end := len(path)
+	for end > i && path[end-1] == '/' {
+		end--
 	}
 
-	if path == "" {
+	if i == end {
 		return []string{"/"}
 	}
 
-	path = strings.ReplaceAll(path, "//", "/")
-	xs := strings.Split(path, "/")
+	res := make([]string, 0, 4)
+	var buf strings.Builder
 
-	var buf string
-	var res []string
-
-	for _, v := range xs {
-		if isParam(v) || isCatchAll(v) {
-			if len(buf) > 0 {
-				res = append(res, buf+"/")
-				buf = ""
-			}
-			res = append(res, v)
-		} else {
-			buf += "/" + v
+	flush := func() {
+		if buf.Len() == 0 {
+			return
 		}
+		buf.WriteByte('/')
+		res = append(res, buf.String())
+		buf.Reset()
 	}
 
-	if buf != "" {
-		res = append(res, buf+"/")
+	for i < end {
+		if path[i] == '/' {
+			i++
+			continue
+		}
+
+		segStart := i
+		for i < end && path[i] != '/' {
+			i++
+		}
+		seg := path[segStart:i]
+
+		if isParam(seg) || isCatchAll(seg) {
+			flush()
+			res = append(res, seg)
+			continue
+		}
+
+		buf.WriteByte('/')
+		buf.WriteString(seg)
 	}
+
+	flush()
 
 	return res
 }
 
 func validateSeq(xs []string) error {
-	set := map[string]struct{}{}
+	set := [32]string{}
+	idx := 0
 
 	for i := range xs {
 		k := xs[i]
@@ -111,15 +128,17 @@ func validateSeq(xs []string) error {
 			return fmt.Errorf("param name cannot be empty - %s", k)
 		}
 
-		_, ok := set[k]
-		if ok {
-			return fmt.Errorf("duplicate param name - %s", k)
+		for i := range idx {
+			if set[i] == k {
+				return fmt.Errorf("duplicate param name - %s", k)
+			}
 		}
 
-		set[k] = struct{}{}
+		set[idx] = k
+		idx++
 	}
 
-	if len(set) > maxParams {
+	if idx > maxParams {
 		return fmt.Errorf("wildcard limit exceeded")
 	}
 

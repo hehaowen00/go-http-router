@@ -31,6 +31,12 @@ func (n *node) appendFingerprint(b byte) {
 	n.fingerprint = append(n.fingerprint, b)
 }
 
+func (n *node) addChild(childIdx nodePtr, b byte) {
+	i, _ := slices.BinarySearch(n.fingerprint, b)
+	n.children = slices.Insert(n.children, i, childIdx)
+	n.fingerprint = slices.Insert(n.fingerprint, i, b)
+}
+
 func (n *node) isEmpty() bool {
 	return n.handlerIdx < 0 && len(n.children) == 0 && len(n.wildcard) == 0 &&
 		!n.hasCatchAll
@@ -304,6 +310,10 @@ func search(
 	rem := l - idx
 
 	for j, c := range n.children {
+		if b < n.fingerprint[j] {
+			break
+		}
+
 		if b != n.fingerprint[j] {
 			continue
 		}
@@ -436,6 +446,10 @@ func insert(
 	b := currentSegment[0]
 
 	for i := range n.children {
+		if b < n.fingerprint[i] {
+			break
+		}
+
 		if b != n.fingerprint[i] {
 			continue
 		}
@@ -458,8 +472,7 @@ func insert(
 		)
 
 		n = &(*nodes)[nodeIdx]
-		n.children = append(n.children, childIdx)
-		n.appendFingerprint((*nodes)[childIdx].prefix[0])
+		n.addChild(childIdx, (*nodes)[childIdx].prefix[0])
 
 		if currentSegment == "/" {
 			n.slashChild = childIdx
@@ -581,6 +594,10 @@ func remove(nodes []node, nodeIdx nodePtr, pathSeq []string) bool {
 	b := currentSegment[0]
 
 	for i := range n.children {
+		if b < n.fingerprint[i] {
+			break
+		}
+
 		if b != n.fingerprint[i] {
 			continue
 		}

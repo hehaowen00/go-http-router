@@ -68,7 +68,7 @@ func (r *Router[T]) Search(method string, path string, params *Params) *T {
 		return nil
 	}
 
-	if !strings.HasPrefix(path, "/") {
+	if len(path) == 0 || path[0] != '/' {
 		path = "/" + path
 	}
 

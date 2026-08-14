@@ -3,8 +3,6 @@ package gohttprouter
 import "strings"
 
 func splitPath(path string) []string {
-	path = strings.TrimSpace(path)
-
 	if len(path) == 0 {
 		return []string{"/"}
 	}
@@ -75,6 +73,8 @@ func splitPathFast(path string) ([]string, bool) {
 }
 
 func splitPathSlow(path string) []string {
+	path = strings.TrimSpace(path)
+
 	if len(path) == 0 {
 		return []string{"/"}
 	}

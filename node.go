@@ -7,9 +7,11 @@ import (
 
 type nodePtr int32
 
+type handlerPtr int32
+
 type node[T any] struct {
 	prefix       string
-	handler      *T
+	handlerIdx   handlerPtr
 	hasParams    bool
 	hasCatchAll  bool
 	catchAllNode nodePtr
@@ -28,7 +30,7 @@ func (n *node[T]) appendFingerprint(b byte) {
 }
 
 func (n *node[T]) isEmpty() bool {
-	return n.handler == nil && len(n.children) == 0 && len(n.wildcard) == 0 &&
+	return n.handlerIdx < 0 && len(n.children) == 0 && len(n.wildcard) == 0 &&
 		!n.hasCatchAll
 }
 
@@ -52,8 +54,9 @@ type wildcard struct {
 }
 
 func newNode[T any](nodes *[]node[T]) nodePtr {
-	*nodes = append(*nodes, node[T]{})
-
+	// handlerIdx defaults to -1: a zero value of 0 would alias a real
+	// handler in the arena.
+	*nodes = append(*nodes, node[T]{handlerIdx: -1})
 	return nodePtr(len(*nodes) - 1)
 }
 
@@ -83,21 +86,21 @@ func search[T any](
 	path string,
 	idx int,
 	params *Params,
-) *T {
+) handlerPtr {
 	l := len(path)
 
 	if idx == l || (idx == l-1 && path[idx] == '/') {
-		if n.handler != nil {
-			return n.handler
+		if n.handlerIdx >= 0 {
+			return n.handlerIdx
 		}
 
 		for _, c := range n.children {
 			if nodes[c].prefix == "/" {
-				return nodes[c].handler
+				return nodes[c].handlerIdx
 			}
 		}
 
-		return nil
+		return -1
 	}
 
 	b := path[idx]
@@ -119,7 +122,7 @@ func search[T any](
 			}
 
 			h := search(child, nodes, path, idx+pLen, params)
-			if h != nil {
+			if h >= 0 {
 				return h
 			}
 
@@ -128,8 +131,8 @@ func search[T any](
 			}
 		} else if pLen == rem+1 && child.prefix[pLen-1] == '/' &&
 			path[idx:] == child.prefix[:rem] {
-			if child.handler != nil {
-				return child.handler
+			if child.handlerIdx >= 0 {
+				return child.handlerIdx
 			}
 		}
 
@@ -137,11 +140,11 @@ func search[T any](
 	}
 
 	if !n.hasParams {
-		return nil
+		return -1
 	}
 
 	if len(n.wildcard) == 0 && !n.hasCatchAll {
-		return nil
+		return -1
 	}
 
 	segmentStart := idx
@@ -179,7 +182,7 @@ func search[T any](
 			segmentEnd,
 			params,
 		)
-		if h != nil {
+		if h >= 0 {
 			return h
 		}
 
@@ -191,17 +194,17 @@ func search[T any](
 		return search(&nodes[n.catchAllNode], nodes, path, len(path), params)
 	}
 
-	return nil
+	return -1
 }
 
 func insert[T any](
 	nodes *[]node[T],
 	nodeIdx nodePtr,
 	pathSeq []string,
-	handler *T,
+	handlerIdx handlerPtr,
 ) (newParam bool) {
 	if len(pathSeq) == 0 {
-		(*nodes)[nodeIdx].handler = handler
+		(*nodes)[nodeIdx].handlerIdx = handlerIdx
 		return false
 	}
 
@@ -223,7 +226,7 @@ func insert[T any](
 			n.catchAllName = name
 		}
 
-		insert(nodes, n.catchAllNode, pathSeq[1:], handler)
+		insert(nodes, n.catchAllNode, pathSeq[1:], handlerIdx)
 
 		n = &(*nodes)[nodeIdx]
 		n.hasParams = true
@@ -242,7 +245,7 @@ func insert[T any](
 			nodes,
 			n.wildcard[wildcardIdx].node,
 			pathSeq,
-			handler,
+			handlerIdx,
 		)
 
 		n = &(*nodes)[nodeIdx]
@@ -277,7 +280,7 @@ func insert[T any](
 			nodes,
 			childIdx,
 			pathSeq[1:],
-			handler,
+			handlerIdx,
 		)
 
 		n = &(*nodes)[nodeIdx]
@@ -303,7 +306,7 @@ func insert[T any](
 			nodes,
 			n.children[closestIdx],
 			pathSeq,
-			handler,
+			handlerIdx,
 		)
 
 		if newParam {
@@ -333,7 +336,7 @@ func insert[T any](
 			pathSeq[0] = pathSeq[0][best:]
 		}
 
-		newParam = insert(nodes, newChildIdx, pathSeq, handler)
+		newParam = insert(nodes, newChildIdx, pathSeq, handlerIdx)
 
 		if newParam {
 			(*nodes)[nodeIdx].hasParams = true
@@ -349,11 +352,11 @@ func remove[T any](nodes []node[T], nodeIdx nodePtr, pathSeq []string) bool {
 	if len(pathSeq) == 0 {
 		n := &nodes[nodeIdx]
 
-		if n.handler == nil {
+		if n.handlerIdx < 0 {
 			return false
 		}
 
-		n.handler = nil
+		n.handlerIdx = -1
 		return true
 	}
 

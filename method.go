@@ -15,6 +15,7 @@ const (
 	methodOptions
 	methodHead
 	methodCount
+	methodNotFound = 255
 )
 
 func methodToEnum(method string) methodEnum {
@@ -38,6 +39,6 @@ func methodToEnum(method string) methodEnum {
 	case http.MethodHead:
 		return methodHead
 	default:
-		return 255
+		return methodNotFound
 	}
 }

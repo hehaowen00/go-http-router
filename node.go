@@ -7,16 +7,16 @@ import (
 
 type nodePtr int32
 
-type node struct {
+type node[T any] struct {
 	prefix      string
-	handler     Handler
+	handler     *T
 	hasParams   bool
 	fingerprint []byte
 	children    []nodePtr
 	wildcard    []wildcard
 }
 
-func (n *node) rebuildFingerprint(nodes []node) {
+func (n *node[T]) rebuildFingerprint(nodes []node[T]) {
 	n.fingerprint = n.fingerprint[:0]
 
 	for _, c := range n.children {
@@ -24,11 +24,11 @@ func (n *node) rebuildFingerprint(nodes []node) {
 	}
 }
 
-func (n *node) isEmpty() bool {
+func (n *node[T]) isEmpty() bool {
 	return n.handler == nil && len(n.children) == 0 && len(n.wildcard) == 0
 }
 
-func (n *node) recomputeHasParams(nodes []node) bool {
+func (n *node[T]) recomputeHasParams(nodes []node[T]) bool {
 	if len(n.wildcard) > 0 {
 		return true
 	}
@@ -47,13 +47,13 @@ type wildcard struct {
 	node nodePtr
 }
 
-func newNode(nodes *[]node) nodePtr {
-	*nodes = append(*nodes, node{})
+func newNode[T any](nodes *[]node[T]) nodePtr {
+	*nodes = append(*nodes, node[T]{})
 
 	return nodePtr(len(*nodes) - 1)
 }
 
-func getWildcard(nodes *[]node, idx nodePtr, name string) (int32, bool) {
+func getWildcard[T any](nodes *[]node[T], idx nodePtr, name string) (int32, bool) {
 	n := &(*nodes)[idx]
 
 	for i := range n.wildcard {
@@ -73,13 +73,13 @@ func getWildcard(nodes *[]node, idx nodePtr, name string) (int32, bool) {
 	return int32(len(n.wildcard) - 1), true
 }
 
-func search(
-	nodes []node,
+func search[T any](
+	nodes []node[T],
 	nodeIdx nodePtr,
 	path string,
 	idx int,
 	params *Params,
-) Handler {
+) *T {
 	n := &nodes[nodeIdx]
 
 	if idx == len(path) || (idx == len(path)-1 && path[idx] == '/') {
@@ -171,14 +171,14 @@ func search(
 	return nil
 }
 
-func insert(
-	nodes *[]node,
+func insert[T any](
+	nodes *[]node[T],
 	nodeIdx nodePtr,
 	pathSeq []string,
-	handler Handler,
+	handler T,
 ) (newParam bool) {
 	if len(pathSeq) == 0 {
-		(*nodes)[nodeIdx].handler = handler
+		(*nodes)[nodeIdx].handler = &handler
 		return false
 	}
 
@@ -293,7 +293,7 @@ func insert(
 	return false
 }
 
-func remove(nodes []node, nodeIdx nodePtr, pathSeq []string) bool {
+func remove[T any](nodes []node[T], nodeIdx nodePtr, pathSeq []string) bool {
 	if len(pathSeq) == 0 {
 		n := &nodes[nodeIdx]
 
@@ -368,10 +368,12 @@ func remove(nodes []node, nodeIdx nodePtr, pathSeq []string) bool {
 	}
 
 	n = &nodes[nodeIdx]
+
 	if nodes[childIdx].isEmpty() {
 		n.children = slices.Delete(n.children, closestIdx, closestIdx+1)
 		n.rebuildFingerprint(nodes)
 	}
+
 	n.hasParams = n.recomputeHasParams(nodes)
 
 	return true

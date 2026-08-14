@@ -73,7 +73,7 @@ func TestRouter(t *testing.T) {
 		"/api/goodbye",
 		"/api/hello/me",
 		"/api/hello/:message",
-		// "/api/hello/:a/:b",
+		"/api/hello/:a/:b",
 		"/api/hello/:message/n",
 		"/api/help",
 	}
@@ -96,17 +96,12 @@ func TestRouter(t *testing.T) {
 }
 
 func TestRouterGithub(t *testing.T) {
-	r := New[dummyHandler]()
+	r := New[int]()
 	params := Params{}
 
-	for _, route := range githubAPI {
-		r.Add(route[0], route[1], dummyHandler{})
-
-		h := r.Search(route[0], route[1], &params)
-		if h == nil {
-			inspect.Inspect(r)
-			t.Log("failed to find", route[0], route[1])
-			t.FailNow()
+	for i, route := range githubAPI {
+		if err := r.Add(route[0], route[1], i); err != nil {
+			t.Fatalf("add %s %s: %v", route[0], route[1], err)
 		}
 	}
 
@@ -116,6 +111,13 @@ func TestRouterGithub(t *testing.T) {
 			inspect.Inspect(r)
 			t.Log("failed to find", route[0], route[1])
 			t.FailNow()
+		}
+	}
+
+	for i, route := range githubAPI {
+		r.Remove(route[0], route[1])
+		if h := r.Search(route[0], route[1], &params); h != nil && *h == i {
+			t.Fatalf("failed to remove %s %s", route[0], route[1])
 		}
 	}
 }

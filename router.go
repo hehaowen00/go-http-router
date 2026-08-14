@@ -84,7 +84,7 @@ func (r *Router[T]) Search(method string, path string, params *Params) *T {
 		return nil
 	}
 
-	idx := search(&r.nodes[m][0], r.nodes[m], path, 0, params)
+	idx := search(r.nodes[m], path, params)
 	if idx < 0 {
 		params.reset()
 		return nil

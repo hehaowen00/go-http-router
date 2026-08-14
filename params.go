@@ -37,22 +37,14 @@ func (p *Params) set(key string, value string) {
 	p.idx++
 }
 
-// func (p *Params) clear() {
-// 	p.idx = 0
-// }
-
 func (p *Params) save() paramsIndex {
 	return p.idx
 }
 
 func (p *Params) restore(idx paramsIndex) {
-	// clear(p.entries[idx:p.idx])
 	p.idx = idx
 }
 
 func (p *Params) reset() {
-	if p.idx > 0 {
-		clear(p.entries[:p.idx])
-		p.idx = 0
-	}
+	p.idx = 0
 }

@@ -8,18 +8,15 @@ import (
 type nodePtr int32
 
 type node[T any] struct {
-	prefix      string
-	handler     *T
-	hasParams   bool
-	fingerprint []byte
-	children    []nodePtr
-	wildcard    []wildcard
-	catchAll    *catchAll
-}
-
-type catchAll struct {
-	name string
-	node nodePtr
+	prefix       string
+	handler      *T
+	hasParams    bool
+	hasCatchAll  bool
+	fingerprint  []byte
+	children     []nodePtr
+	wildcard     []wildcard
+	catchAllName string
+	catchAllNode nodePtr
 }
 
 func (n *node[T]) appendFingerprint(b byte) {
@@ -32,11 +29,11 @@ func (n *node[T]) appendFingerprint(b byte) {
 
 func (n *node[T]) isEmpty() bool {
 	return n.handler == nil && len(n.children) == 0 && len(n.wildcard) == 0 &&
-		n.catchAll == nil
+		!n.hasCatchAll
 }
 
 func (n *node[T]) recomputeHasParams(nodes []node[T]) bool {
-	if len(n.wildcard) > 0 || n.catchAll != nil {
+	if len(n.wildcard) > 0 || n.hasCatchAll {
 		return true
 	}
 
@@ -143,7 +140,7 @@ func search[T any](
 		return nil
 	}
 
-	if len(n.wildcard) == 0 && n.catchAll == nil {
+	if len(n.wildcard) == 0 && !n.hasCatchAll {
 		return nil
 	}
 
@@ -159,7 +156,7 @@ func search[T any](
 
 	value := path[segmentStart : segmentStart+segmentEnd]
 
-	if len(n.wildcard) == 1 && n.catchAll == nil {
+	if len(n.wildcard) == 1 && !n.hasCatchAll {
 		wc := &n.wildcard[0]
 		params.set(wc.name, value)
 
@@ -193,9 +190,9 @@ func search[T any](
 		params.restore(paramsIdx)
 	}
 
-	if n.catchAll != nil {
-		params.set(n.catchAll.name, strings.TrimPrefix(path[idx:], "/"))
-		return search(&nodes[n.catchAll.node], nodes, path, len(path), params)
+	if n.hasCatchAll {
+		params.set(n.catchAllName, strings.TrimPrefix(path[idx:], "/"))
+		return search(&nodes[n.catchAllNode], nodes, path, len(path), params)
 	}
 
 	return nil
@@ -218,20 +215,19 @@ func insert[T any](
 	if isCatchAll(currentSegment) {
 		name := catchAllName(currentSegment)
 
-		if n.catchAll == nil {
+		if !n.hasCatchAll {
 			childIdx := newNode(nodes)
 
 			n = &(*nodes)[nodeIdx]
-			n.catchAll = &catchAll{
-				name: name,
-				node: childIdx,
-			}
+			n.catchAllName = name
+			n.catchAllNode = childIdx
+			n.hasCatchAll = true
 		} else {
 			n = &(*nodes)[nodeIdx]
-			n.catchAll.name = name
+			n.catchAllName = name
 		}
 
-		insert(nodes, n.catchAll.node, pathSeq[1:], handler)
+		insert(nodes, n.catchAllNode, pathSeq[1:], handler)
 
 		n = &(*nodes)[nodeIdx]
 		n.hasParams = true
@@ -364,13 +360,14 @@ func remove[T any](nodes []node[T], nodeIdx nodePtr, pathSeq []string) bool {
 	n := &nodes[nodeIdx]
 
 	if isCatchAll(currentSegment) {
-		if n.catchAll == nil || n.catchAll.name != catchAllName(currentSegment) {
+		if !n.hasCatchAll || n.catchAllName != catchAllName(currentSegment) {
 			return false
 		}
 
-		removed := remove(nodes, n.catchAll.node, pathSeq[1:])
-		if removed && nodes[n.catchAll.node].isEmpty() {
-			n.catchAll = nil
+		removed := remove(nodes, n.catchAllNode, pathSeq[1:])
+		if removed && nodes[n.catchAllNode].isEmpty() {
+			n.hasCatchAll = false
+			n.catchAllName = ""
 		}
 
 		n.hasParams = n.recomputeHasParams(nodes)

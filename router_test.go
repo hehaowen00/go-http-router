@@ -20,44 +20,6 @@ func (dummyHandler) Handle(c Context) {
 	log.Println(n, err)
 }
 
-// func TestHandlersCount(t *testing.T) {
-// 	var h methodHandler
-
-// 	if got := h.count; got != 0 {
-// 		t.Fatalf("empty handlers: count = %d, want 0", got)
-// 	}
-
-// 	h.Insert(methodToEnum(http.MethodGet), dummyHandler{})
-
-// 	if got := h.count; got != 1 {
-// 		t.Fatalf("after GET: count = %d, want 1", got)
-// 	}
-
-// 	for _, m := range []string{
-// 		http.MethodPost,
-// 		http.MethodPut,
-// 		http.MethodDelete,
-// 		http.MethodConnect,
-// 		http.MethodOptions,
-// 	} {
-// 		h.Insert(methodToEnum(m), dummyHandler{})
-// 	}
-
-// 	if got := h.count; got != 6 {
-// 		t.Fatalf("all six methods: count = %d, want 6", got)
-// 	}
-
-// 	h.Insert(methodToEnum(http.MethodGet), dummyHandler{})
-// 	if got := h.count; got != 6 {
-// 		t.Fatalf("after re-setting GET: count = %d, want 6", got)
-// 	}
-
-// 	handler := h.Get(methodToEnum(http.MethodPatch))
-// 	if handler != nil {
-// 		t.Fatalf("expected nil for PATCH, got %v", handler)
-// 	}
-// }
-
 func TestPathSplit(t *testing.T) {
 	paths := []string{
 		"/public//",
@@ -89,7 +51,7 @@ func TestPathSplit(t *testing.T) {
 }
 
 func TestRootRoute(t *testing.T) {
-	r := New()
+	r := New[dummyHandler]()
 	r.Add(http.MethodGet, "/", dummyHandler{})
 
 	params := Params{}
@@ -116,7 +78,7 @@ func TestRouter(t *testing.T) {
 		"/api/help",
 	}
 
-	r := New()
+	r := New[dummyHandler]()
 
 	for _, route := range routes {
 		r.Add(http.MethodGet, route, dummyHandler{})
@@ -134,7 +96,7 @@ func TestRouter(t *testing.T) {
 }
 
 func TestRouterGithub(t *testing.T) {
-	r := New()
+	r := New[dummyHandler]()
 	params := Params{}
 
 	for _, route := range githubAPI {
@@ -162,7 +124,7 @@ func BenchmarkBuildGithubAPI(b *testing.B) {
 	b.ReportAllocs()
 
 	for i := 0; b.Loop(); i++ {
-		r := New()
+		r := New[dummyHandler]()
 
 		for _, route := range githubAPI {
 			r.Add(route[0], route[1], dummyHandler{})
@@ -175,7 +137,7 @@ func BenchmarkBuildGithubAPIInsertOnly(b *testing.B) {
 	b.ResetTimer()
 
 	for i := 0; b.Loop(); i++ {
-		r := New()
+		r := New[dummyHandler]()
 
 		for _, route := range githubAPI {
 			r.Add(route[0], route[1], dummyHandler{})
@@ -184,7 +146,7 @@ func BenchmarkBuildGithubAPIInsertOnly(b *testing.B) {
 }
 
 func BenchmarkRouterGithub(b *testing.B) {
-	r := New()
+	r := New[dummyHandler]()
 	for _, route := range githubAPI {
 		r.Add(route[0], route[1], dummyHandler{})
 	}
@@ -201,7 +163,7 @@ func BenchmarkRouterGithub(b *testing.B) {
 }
 
 func BenchmarkRouterGithubAll(b *testing.B) {
-	r := New()
+	r := New[dummyHandler]()
 	for _, route := range githubAPI {
 		r.Add(route[0], route[1], dummyHandler{})
 	}
@@ -219,7 +181,7 @@ func BenchmarkRouterGithubAll(b *testing.B) {
 }
 
 func BenchmarkRouterGithubRandom(b *testing.B) {
-	r := New()
+	r := New[dummyHandler]()
 	for _, route := range githubAPI {
 		r.Add(route[0], route[1], dummyHandler{})
 	}

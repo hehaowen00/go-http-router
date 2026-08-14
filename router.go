@@ -2,15 +2,15 @@ package gohttprouter
 
 import "strings"
 
-type Router struct {
-	nodes [methodCount][]node
+type Router[T any] struct {
+	nodes [methodCount][]node[T]
 }
 
-func New() *Router {
-	return &Router{}
+func New[T any]() *Router[T] {
+	return &Router[T]{}
 }
 
-func (r *Router) Add(method string, path string, handler Handler) {
+func (r *Router[T]) Add(method string, path string, handler T) {
 	pathSeq := splitPath(path)
 
 	err := validateSeq(pathSeq)
@@ -19,22 +19,22 @@ func (r *Router) Add(method string, path string, handler Handler) {
 	}
 
 	m := methodToEnum(method)
-	if m == 255 {
+	if m == methodNotFound {
 		return
 	}
 
 	if r.nodes[m] == nil {
-		r.nodes[m] = make([]node, 1)
+		r.nodes[m] = make([]node[T], 1)
 	}
 
 	insert(&r.nodes[m], 0, pathSeq, handler)
 }
 
-func (r *Router) Search(method string, path string, params *Params) Handler {
+func (r *Router[T]) Search(method string, path string, params *Params) *T {
 	params.reset()
 
 	m := methodToEnum(method)
-	if m == 255 {
+	if m == methodNotFound {
 		return nil
 	}
 
@@ -54,7 +54,7 @@ func (r *Router) Search(method string, path string, params *Params) Handler {
 	return h
 }
 
-func (r *Router) Remove(method string, path string) {
+func (r *Router[T]) Remove(method string, path string) {
 	pathSeq := splitPath(path)
 
 	err := validateSeq(pathSeq)
@@ -63,7 +63,7 @@ func (r *Router) Remove(method string, path string) {
 	}
 
 	m := methodToEnum(method)
-	if m == 255 {
+	if m == methodNotFound {
 		return
 	}
 

@@ -20,6 +20,7 @@ type node struct {
 	children     []nodePtr
 	wildcard     []wildcard
 	catchAllName string
+	params       []string
 }
 
 func (n *node) appendFingerprint(b byte) {
@@ -79,6 +80,174 @@ func getWildcard(nodes *[]node, idx nodePtr, name string) (int32, bool) {
 	return int32(len(n.wildcard) - 1), true
 }
 
+func (n *node) isFreshRun() bool {
+	return len(n.params) == 0 && n.handlerIdx < 0 && len(n.children) == 0 &&
+		len(n.wildcard) == 0 && !n.hasCatchAll
+}
+
+func collectParamRun(pathSeq []string) []string {
+	i := 0
+	for i < len(pathSeq) && isParam(pathSeq[i]) {
+		i++
+	}
+	return pathSeq[:i]
+}
+
+func commonPrefixLen(a, b []string) int {
+	i := 0
+	for i < len(a) && i < len(b) && a[i] == b[i] {
+		i++
+	}
+	return i
+}
+
+func insertParamRun(nodes *[]node, nodeIdx nodePtr, names []string, rest []string, handlerIdx handlerPtr) bool {
+	n := &(*nodes)[nodeIdx]
+
+	wcIdx, created := getWildcard(nodes, nodeIdx, names[0])
+	n = &(*nodes)[nodeIdx]
+	childIdx := n.wildcard[wcIdx].node
+
+	newParam := insertRunNode(nodes, childIdx, names, rest, handlerIdx)
+
+	n = &(*nodes)[nodeIdx]
+	if created || newParam {
+		n.hasParams = true
+	}
+
+	return created || newParam
+}
+
+func insertRunNode(nodes *[]node, nodeIdx nodePtr, names []string, rest []string, handlerIdx handlerPtr) bool {
+	n := &(*nodes)[nodeIdx]
+
+	if n.isFreshRun() {
+		n.params = names
+		return insert(nodes, nodeIdx, rest, handlerIdx)
+	}
+
+	cp := commonPrefixLen(n.params, names)
+
+	if cp < len(n.params) {
+		splitRunNode(nodes, nodeIdx, cp)
+		n = &(*nodes)[nodeIdx]
+	}
+
+	names = names[cp:]
+
+	if len(names) == 0 {
+		return insert(nodes, nodeIdx, rest, handlerIdx)
+	}
+
+	wcIdx, created := getWildcard(nodes, nodeIdx, names[0])
+	n = &(*nodes)[nodeIdx]
+	childIdx := n.wildcard[wcIdx].node
+
+	newParam := insertRunNode(nodes, childIdx, names, rest, handlerIdx)
+
+	n = &(*nodes)[nodeIdx]
+	if created || newParam {
+		n.hasParams = true
+	}
+
+	return created || newParam
+}
+
+func splitRunNode(nodes *[]node, nodeIdx nodePtr, cp int) {
+	old := &(*nodes)[nodeIdx]
+
+	newIdx := newNode(nodes)
+	moved := &(*nodes)[newIdx]
+
+	moved.params = old.params[cp:]
+	moved.handlerIdx = old.handlerIdx
+	moved.hasParams = old.hasParams
+	moved.hasCatchAll = old.hasCatchAll
+	moved.catchAllNode = old.catchAllNode
+	moved.slashChild = old.slashChild
+	moved.fingerprint = old.fingerprint
+	moved.children = old.children
+	moved.wildcard = old.wildcard
+	moved.catchAllName = old.catchAllName
+
+	old.params = old.params[:cp]
+	old.handlerIdx = -1
+	old.hasParams = true
+	old.hasCatchAll = false
+	old.catchAllNode = -1
+	old.slashChild = -1
+	old.fingerprint = nil
+	old.children = nil
+	old.wildcard = []wildcard{{name: moved.params[0], node: newIdx}}
+	old.catchAllName = ""
+}
+
+func removeParamRun(nodes []node, nodeIdx nodePtr, names []string, rest []string) bool {
+	n := &nodes[nodeIdx]
+
+	for i := range n.wildcard {
+		if n.wildcard[i].name != names[0] {
+			continue
+		}
+
+		childIdx := n.wildcard[i].node
+
+		removed := removeRunNode(nodes, childIdx, names, rest)
+		if !removed {
+			return false
+		}
+
+		n = &nodes[nodeIdx]
+		if nodes[childIdx].isEmpty() {
+			n.wildcard = slices.Delete(n.wildcard, i, i+1)
+		}
+		n.hasParams = n.recomputeHasParams(nodes)
+
+		return true
+	}
+
+	return false
+}
+
+func removeRunNode(nodes []node, nodeIdx nodePtr, names []string, rest []string) bool {
+	n := &nodes[nodeIdx]
+
+	cp := commonPrefixLen(n.params, names)
+
+	if cp < len(n.params) {
+		return false
+	}
+
+	names = names[cp:]
+
+	if len(names) == 0 {
+		return remove(nodes, nodeIdx, rest)
+	}
+
+	for i := range n.wildcard {
+		if n.wildcard[i].name != names[0] {
+			continue
+		}
+
+		childIdx := n.wildcard[i].node
+
+		removed := removeRunNode(nodes, childIdx, names, rest)
+		if !removed {
+			return false
+		}
+
+		n = &nodes[nodeIdx]
+		if nodes[childIdx].isEmpty() {
+			n.wildcard = slices.Delete(n.wildcard, i, i+1)
+		}
+		n.hasParams = n.recomputeHasParams(nodes)
+
+		return true
+	}
+
+	return false
+}
+
 func search(
 	n *node,
 	nodes []node,
@@ -88,7 +257,38 @@ func search(
 ) handlerPtr {
 	l := len(path)
 
-	if idx == l || (idx == l-1 && path[idx] == '/') {
+	for _, name := range n.params {
+		if idx >= l {
+			return -1
+		}
+
+		segStart := idx
+		if path[segStart] == '/' {
+			segStart++
+		}
+
+		if segStart >= l {
+			return -1
+		}
+
+		segEnd := nextSlash(path, segStart, l)
+		params.set(name, path[segStart:segEnd])
+		idx = segEnd
+	}
+
+	if idx >= l {
+		if n.handlerIdx >= 0 {
+			return n.handlerIdx
+		}
+
+		if n.slashChild >= 0 {
+			return nodes[n.slashChild].handlerIdx
+		}
+
+		return -1
+	}
+
+	if idx == l-1 && path[idx] == '/' {
 		if n.handlerIdx >= 0 {
 			return n.handlerIdx
 		}
@@ -144,39 +344,27 @@ func search(
 		return -1
 	}
 
-	segmentStart := idx
-	if path[segmentStart] == '/' {
-		segmentStart++
-	}
-
-	segmentEnd := nextSlash(path, segmentStart, len(path))
-	value := path[segmentStart:segmentEnd]
-
 	if len(n.wildcard) == 1 && !n.hasCatchAll {
 		wc := &n.wildcard[0]
-		params.set(wc.name, value)
-
-		h := search(
+		return search(
 			&nodes[wc.node],
 			nodes,
 			path,
-			segmentEnd,
+			idx,
 			params,
 		)
-		return h
 	}
 
 	for wi := 0; wi < len(n.wildcard); wi++ {
 		paramsIdx := params.save()
 
 		wc := &n.wildcard[wi]
-		params.set(wc.name, value)
 
 		h := search(
 			&nodes[wc.node],
 			nodes,
 			path,
-			segmentEnd,
+			idx,
 			params,
 		)
 		if h >= 0 {
@@ -232,26 +420,15 @@ func insert(
 	}
 
 	if isParam(currentSegment) {
-		name := paramName(currentSegment)
+		run := collectParamRun(pathSeq)
+		rest := pathSeq[len(run):]
 
-		wildcardIdx, created := getWildcard(nodes, nodeIdx, name)
-		n = &(*nodes)[nodeIdx]
-
-		pathSeq = pathSeq[1:]
-		newParam = insert(
-			nodes,
-			n.wildcard[wildcardIdx].node,
-			pathSeq,
-			handlerIdx,
-		)
-
-		n = &(*nodes)[nodeIdx]
-
-		if created || newParam {
-			n.hasParams = true
+		names := make([]string, len(run))
+		for i := range run {
+			names[i] = paramName(run[i])
 		}
 
-		return created || newParam
+		return insertParamRun(nodes, nodeIdx, names, rest, handlerIdx)
 	}
 
 	closestIdx := -1
@@ -388,30 +565,15 @@ func remove(nodes []node, nodeIdx nodePtr, pathSeq []string) bool {
 	}
 
 	if isParam(currentSegment) {
-		name := paramName(currentSegment)
+		run := collectParamRun(pathSeq)
+		rest := pathSeq[len(run):]
 
-		for i := range n.wildcard {
-			if n.wildcard[i].name != name {
-				continue
-			}
-
-			childIdx := n.wildcard[i].node
-
-			removed := remove(nodes, childIdx, pathSeq[1:])
-			if !removed {
-				return false
-			}
-
-			n = &nodes[nodeIdx]
-			if nodes[childIdx].isEmpty() {
-				n.wildcard = slices.Delete(n.wildcard, i, i+1)
-			}
-			n.hasParams = n.recomputeHasParams(nodes)
-
-			return true
+		names := make([]string, len(run))
+		for i := range run {
+			names[i] = paramName(run[i])
 		}
 
-		return false
+		return removeParamRun(nodes, nodeIdx, names, rest)
 	}
 
 	closestIdx := -1

@@ -1,7 +1,11 @@
 package gohttprouter
 
+const maxParams = 32
+
+// cannot have more than 32 params
+// paths are validated on router build to not have more than 32 params
 type Params struct {
-	entries [32]param
+	entries [maxParams]param
 	idx     paramsIndex
 }
 
@@ -28,13 +32,14 @@ func (p *Params) set(key string, value string) {
 	if p.idx >= 32 {
 		return
 	}
+
 	p.entries[p.idx] = param{key, value}
 	p.idx++
 }
 
-func (p *Params) clear() {
-	p.idx = 0
-}
+// func (p *Params) clear() {
+// 	p.idx = 0
+// }
 
 func (p *Params) save() paramsIndex {
 	return p.idx
@@ -47,7 +52,7 @@ func (p *Params) restore(idx paramsIndex) {
 
 func (p *Params) reset() {
 	if p.idx > 0 {
-		clear(p.entries[:p.idx])
+		// clear(p.entries[:p.idx])
 		p.idx = 0
 	}
 }

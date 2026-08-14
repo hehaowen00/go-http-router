@@ -260,8 +260,13 @@ func insert[T any](
 
 	closestIdx := -1
 	best := 0
+	b := currentSegment[0]
 
 	for i := range n.children {
+		if b != n.fingerprint[i] {
+			continue
+		}
+
 		score := longestMatch(currentSegment, (*nodes)[n.children[i]].prefix)
 		if score > best {
 			best = score
@@ -404,8 +409,13 @@ func remove[T any](nodes []node[T], nodeIdx nodePtr, pathSeq []string) bool {
 
 	closestIdx := -1
 	best := 0
+	b := currentSegment[0]
 
 	for i := range n.children {
+		if b != n.fingerprint[i] {
+			continue
+		}
+
 		score := longestMatch(currentSegment, nodes[n.children[i]].prefix)
 		if score > best {
 			best = score

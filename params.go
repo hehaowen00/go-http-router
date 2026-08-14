@@ -46,7 +46,7 @@ func (p *Params) save() paramsIndex {
 }
 
 func (p *Params) restore(idx paramsIndex) {
-	clear(p.entries[idx:p.idx])
+	// clear(p.entries[idx:p.idx])
 	p.idx = idx
 }
 

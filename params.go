@@ -29,10 +29,6 @@ func (p *Params) Get(key string) string {
 }
 
 func (p *Params) set(key string, value string) {
-	if p.idx >= 32 {
-		return
-	}
-
 	p.entries[p.idx] = param{key, value}
 	p.idx++
 }

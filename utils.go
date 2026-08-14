@@ -56,12 +56,21 @@ func longestMatch(left, right string) int {
 func splitPath(path string) []string {
 	path = strings.TrimSpace(path)
 
-	i := 0
-	for i < len(path) && path[i] == '/' {
-		i++
+	if len(path) == 0 {
+		return []string{"/"}
 	}
 
+	if path[0] != '/' {
+		path = "/" + path
+	}
+
+	if strings.Contains(path, "//") {
+		path = collapseSlashes(path)
+	}
+
+	i := 1
 	end := len(path)
+
 	for end > i && path[end-1] == '/' {
 		end--
 	}
@@ -71,16 +80,7 @@ func splitPath(path string) []string {
 	}
 
 	res := make([]string, 0, 4)
-	var buf strings.Builder
-
-	flush := func() {
-		if buf.Len() == 0 {
-			return
-		}
-		buf.WriteByte('/')
-		res = append(res, buf.String())
-		buf.Reset()
-	}
+	staticStart := -1
 
 	for i < end {
 		if path[i] == '/' {
@@ -89,24 +89,51 @@ func splitPath(path string) []string {
 		}
 
 		segStart := i
-		for i < end && path[i] != '/' {
-			i++
-		}
+		i = nextSlash(path, i, end)
 		seg := path[segStart:i]
 
 		if isParam(seg) || isCatchAll(seg) {
-			flush()
+			if staticStart >= 0 {
+				res = append(res, path[staticStart:segStart])
+				staticStart = -1
+			}
+
 			res = append(res, seg)
 			continue
 		}
 
-		buf.WriteByte('/')
-		buf.WriteString(seg)
+		if staticStart < 0 {
+			staticStart = segStart - 1
+		}
 	}
 
-	flush()
+	if staticStart >= 0 {
+		res = append(res, path[staticStart:end]+"/")
+	}
 
 	return res
+}
+
+func collapseSlashes(s string) string {
+	b := make([]byte, 0, len(s))
+
+	last := false
+
+	for i := 0; i < len(s); i++ {
+		if s[i] == '/' {
+			if last {
+				continue
+			}
+
+			last = true
+		} else {
+			last = false
+		}
+
+		b = append(b, s[i])
+	}
+
+	return string(b)
 }
 
 func validateSeq(xs []string) error {

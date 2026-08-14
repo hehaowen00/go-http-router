@@ -18,6 +18,10 @@ func TestPathSplit(t *testing.T) {
 		"/api/hello/:message/n//",
 		"/api/hello//n",
 		"/api/hello/:a/:b",
+		"users/posts",
+		"/:id",
+		"/files/*path",
+		"//users//posts//",
 	}
 
 	expected := [][]string{
@@ -28,6 +32,10 @@ func TestPathSplit(t *testing.T) {
 		{"/api/hello/", ":message", "/n/"},
 		{"/api/hello/n/"},
 		{"/api/hello/", ":a", ":b"},
+		{"/users/posts/"},
+		{":id"},
+		{"/files/", "*path"},
+		{"/users/posts/"},
 	}
 
 	for i, p := range paths {

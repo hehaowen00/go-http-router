@@ -202,10 +202,10 @@ func insert[T any](
 	nodes *[]node[T],
 	nodeIdx nodePtr,
 	pathSeq []string,
-	handler T,
+	handler *T,
 ) (newParam bool) {
 	if len(pathSeq) == 0 {
-		(*nodes)[nodeIdx].handler = &handler
+		(*nodes)[nodeIdx].handler = handler
 		return false
 	}
 

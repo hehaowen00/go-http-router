@@ -30,7 +30,7 @@ func (r *Router[T]) Add(method string, path string, handler T) error {
 		r.nodes[m] = make([]node[T], 1, 64)
 	}
 
-	insert(&r.nodes[m], 0, sequence, handler)
+	insert(&r.nodes[m], 0, sequence, &handler)
 
 	return nil
 }

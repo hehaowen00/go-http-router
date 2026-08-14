@@ -52,7 +52,7 @@ func (p *Params) restore(idx paramsIndex) {
 
 func (p *Params) reset() {
 	if p.idx > 0 {
-		// clear(p.entries[:p.idx])
+		clear(p.entries[:p.idx])
 		p.idx = 0
 	}
 }

@@ -1,7 +1,6 @@
 package gohttprouter
 
 import (
-	"log"
 	"math/rand/v2"
 	"net/http"
 	"slices"
@@ -9,16 +8,6 @@ import (
 
 	"github.com/hehaowen00/go-inspect"
 )
-
-type dummyHandler struct{}
-
-func (dummyHandler) Handle(c Context) {
-	w := c.Writer()
-	w.WriteHeader(http.StatusOK)
-
-	n, err := w.Write([]byte("ok"))
-	log.Println(n, err)
-}
 
 func TestPathSplit(t *testing.T) {
 	paths := []string{
@@ -51,13 +40,13 @@ func TestPathSplit(t *testing.T) {
 }
 
 func TestRootRoute(t *testing.T) {
-	r := New[dummyHandler]()
-	r.Add(http.MethodGet, "/", dummyHandler{})
+	r := New[int]()
+	r.Add(http.MethodGet, "/", 1)
 
 	params := Params{}
 
 	for _, path := range []string{"/", "", "//"} {
-		if h := r.Search(http.MethodGet, path, &params); h == nil {
+		if h := r.Search(http.MethodGet, path, &params); h == nil && *h == 1 {
 			t.Fatalf("Search(%q) = nil, want root handler", path)
 		}
 	}
@@ -78,17 +67,17 @@ func TestRouter(t *testing.T) {
 		"/api/help",
 	}
 
-	r := New[dummyHandler]()
+	r := New[int]()
 
-	for _, route := range routes {
-		r.Add(http.MethodGet, route, dummyHandler{})
+	for i, route := range routes {
+		r.Add(http.MethodGet, route, i)
 	}
 
 	params := Params{}
 
-	for _, route := range routes {
+	for i, route := range routes {
 		h := r.Search(http.MethodGet, route, &params)
-		if h == nil {
+		if h != nil && *h != i {
 			t.Log(route)
 			t.FailNow()
 		}
@@ -126,10 +115,10 @@ func BenchmarkBuildGithubAPI(b *testing.B) {
 	b.ReportAllocs()
 
 	for i := 0; b.Loop(); i++ {
-		r := New[dummyHandler]()
+		r := New[int]()
 
 		for _, route := range githubAPI {
-			r.Add(route[0], route[1], dummyHandler{})
+			r.Add(route[0], route[1], i)
 		}
 	}
 }
@@ -139,18 +128,18 @@ func BenchmarkBuildGithubAPIInsertOnly(b *testing.B) {
 	b.ResetTimer()
 
 	for i := 0; b.Loop(); i++ {
-		r := New[dummyHandler]()
+		r := New[int]()
 
-		for _, route := range githubAPI {
-			r.Add(route[0], route[1], dummyHandler{})
+		for i, route := range githubAPI {
+			r.Add(route[0], route[1], i)
 		}
 	}
 }
 
 func BenchmarkRouterGithub(b *testing.B) {
-	r := New[dummyHandler]()
-	for _, route := range githubAPI {
-		r.Add(route[0], route[1], dummyHandler{})
+	r := New[int]()
+	for i, route := range githubAPI {
+		r.Add(route[0], route[1], i)
 	}
 
 	params := Params{}
@@ -165,9 +154,9 @@ func BenchmarkRouterGithub(b *testing.B) {
 }
 
 func BenchmarkRouterGithubAll(b *testing.B) {
-	r := New[dummyHandler]()
-	for _, route := range githubAPI {
-		r.Add(route[0], route[1], dummyHandler{})
+	r := New[int]()
+	for i, route := range githubAPI {
+		r.Add(route[0], route[1], i)
 	}
 
 	params := Params{}
@@ -183,9 +172,9 @@ func BenchmarkRouterGithubAll(b *testing.B) {
 }
 
 func BenchmarkRouterGithubRandom(b *testing.B) {
-	r := New[dummyHandler]()
-	for _, route := range githubAPI {
-		r.Add(route[0], route[1], dummyHandler{})
+	r := New[int]()
+	for i, route := range githubAPI {
+		r.Add(route[0], route[1], i)
 	}
 
 	xs := rand.Perm(len(githubAPI))

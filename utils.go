@@ -20,11 +20,23 @@ func NewHandlerFunc(handler func(c Context)) Handler {
 }
 
 func isParam(segment string) bool {
-	return strings.HasPrefix(segment, ":")
+	return len(segment) > 0 && segment[0] == ':'
 }
 
 func paramName(segment string) string {
 	return strings.TrimPrefix(segment, ":")
+}
+
+func isCatchAll(segment string) bool {
+	return len(segment) > 0 && segment[0] == '*'
+}
+
+func catchAllName(segment string) string {
+	if len(segment) > 0 && segment[0] == '*' {
+		return segment[1:]
+	}
+
+	return segment
 }
 
 func longestMatch(left, right string) int {
@@ -63,7 +75,7 @@ func splitPath(path string) []string {
 	var res []string
 
 	for _, v := range xs {
-		if strings.HasPrefix(v, ":") {
+		if isParam(v) || isCatchAll(v) {
 			if len(buf) > 0 {
 				res = append(res, buf+"/")
 				buf = ""
@@ -87,7 +99,7 @@ func validateSeq(xs []string) error {
 	for i := range xs {
 		k := xs[i]
 		if k[0] != ':' {
-			continue
+
 		}
 
 		_, ok := set[k]
@@ -98,7 +110,7 @@ func validateSeq(xs []string) error {
 		set[k] = struct{}{}
 	}
 
-	if len(set) > 32 {
+	if len(set) > maxParams {
 		return fmt.Errorf("wildcard limit exceeded")
 	}
 

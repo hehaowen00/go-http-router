@@ -14,6 +14,12 @@ type node[T any] struct {
 	fingerprint []byte
 	children    []nodePtr
 	wildcard    []wildcard
+	catchAll    *catchAll
+}
+
+type catchAll struct {
+	name string
+	node nodePtr
 }
 
 func (n *node[T]) rebuildFingerprint(nodes []node[T]) {
@@ -25,7 +31,8 @@ func (n *node[T]) rebuildFingerprint(nodes []node[T]) {
 }
 
 func (n *node[T]) isEmpty() bool {
-	return n.handler == nil && len(n.children) == 0 && len(n.wildcard) == 0
+	return n.handler == nil && len(n.children) == 0 && len(n.wildcard) == 0 &&
+		n.catchAll == nil
 }
 
 func (n *node[T]) recomputeHasParams(nodes []node[T]) bool {
@@ -82,7 +89,9 @@ func search[T any](
 ) *T {
 	n := &nodes[nodeIdx]
 
-	if idx == len(path) || (idx == len(path)-1 && path[idx] == '/') {
+	l := len(path)
+
+	if idx == l || (idx == l-1 && path[idx] == '/') {
 		if n.handler != nil {
 			return n.handler
 		}
@@ -97,7 +106,7 @@ func search[T any](
 	}
 
 	b := path[idx]
-	rem := len(path) - idx
+	rem := l - idx
 
 	for j, c := range n.children {
 		if b != n.fingerprint[j] {
@@ -132,7 +141,7 @@ func search[T any](
 		break
 	}
 
-	if len(n.wildcard) == 0 {
+	if len(n.wildcard) == 0 && n.catchAll == nil {
 		return nil
 	}
 
@@ -168,6 +177,11 @@ func search[T any](
 		params.restore(paramsIdx)
 	}
 
+	if n.catchAll != nil {
+		params.set(n.catchAll.name, strings.TrimPrefix(path[idx:], "/"))
+		return search(nodes, n.catchAll.node, path, len(path), params)
+	}
+
 	return nil
 }
 
@@ -184,6 +198,29 @@ func insert[T any](
 
 	currentSegment := pathSeq[0]
 	n := &(*nodes)[nodeIdx]
+
+	if isCatchAll(currentSegment) {
+		name := catchAllName(currentSegment)
+
+		if n.catchAll == nil {
+			childIdx := newNode(nodes)
+			n = &(*nodes)[nodeIdx]
+			n.catchAll = &catchAll{
+				name: name,
+				node: childIdx,
+			}
+		} else {
+			n = &(*nodes)[nodeIdx]
+			n.catchAll.name = name
+		}
+
+		insert(nodes, n.catchAll.node, pathSeq[1:], handler)
+
+		n = &(*nodes)[nodeIdx]
+		n.hasParams = true
+
+		return true
+	}
 
 	if isParam(currentSegment) {
 		name := paramName(currentSegment)

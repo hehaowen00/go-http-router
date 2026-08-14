@@ -51,7 +51,7 @@ func (r *Router[T]) Search(method string, path string, params *Params) *T {
 		path = "/" + path
 	}
 
-	h := search(r.nodes[m], 0, path, 0, params)
+	h := search(&r.nodes[m][0], r.nodes[m], path, 0, params)
 	if h == nil {
 		params.reset()
 	}

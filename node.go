@@ -81,13 +81,12 @@ func getWildcard[T any](nodes *[]node[T], idx nodePtr, name string) (int32, bool
 }
 
 func search[T any](
+	n *node[T],
 	nodes []node[T],
-	nodeIdx nodePtr,
 	path string,
 	idx int,
 	params *Params,
 ) *T {
-	n := &nodes[nodeIdx]
 	l := len(path)
 
 	if idx == l || (idx == l-1 && path[idx] == '/') {
@@ -122,7 +121,7 @@ func search[T any](
 				paramsIdx = params.save()
 			}
 
-			h := search(nodes, c, path, idx+pLen, params)
+			h := search(child, nodes, path, idx+pLen, params)
 			if h != nil {
 				return h
 			}
@@ -165,8 +164,8 @@ func search[T any](
 		params.set(wc.name, value)
 
 		h := search(
+			&nodes[wc.node],
 			nodes,
-			nodePtr(wc.node),
 			path,
 			segmentStart+segmentEnd,
 			params,
@@ -181,8 +180,8 @@ func search[T any](
 		params.set(wc.name, value)
 
 		h := search(
+			&nodes[wc.node],
 			nodes,
-			nodePtr(wc.node),
 			path,
 			segmentStart+segmentEnd,
 			params,
@@ -196,7 +195,7 @@ func search[T any](
 
 	if n.catchAll != nil {
 		params.set(n.catchAll.name, strings.TrimPrefix(path[idx:], "/"))
-		return search(nodes, n.catchAll.node, path, len(path), params)
+		return search(&nodes[n.catchAll.node], nodes, path, len(path), params)
 	}
 
 	return nil

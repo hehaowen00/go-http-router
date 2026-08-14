@@ -6,28 +6,48 @@ import (
 )
 
 type Router[T any] struct {
-	nodes [methodCount][]node[T]
+	static [methodCount]map[string]*T
+	nodes  [methodCount][]node[T]
 }
 
 func New[T any]() *Router[T] {
-	return &Router[T]{}
+	return &Router[T]{
+		static: [methodCount]map[string]*T{},
+	}
 }
 
 func (r *Router[T]) Add(method string, path string, handler T) error {
 	sequence := splitPath(path)
-
-	err := validateSeq(sequence)
-	if err != nil {
-		return fmt.Errorf("invalid path - %w", err)
-	}
 
 	m := methodToEnum(method)
 	if m == methodNotFound {
 		return fmt.Errorf("unsupported method - %s", method)
 	}
 
+	err := validateSeq(sequence)
+	if err != nil {
+		return fmt.Errorf("invalid path - %w", err)
+	}
+
 	if r.nodes[m] == nil {
 		r.nodes[m] = make([]node[T], 1, 64)
+	}
+
+	isStatic := isStaticSequence(sequence)
+
+	var sKey string
+	if isStatic {
+		sKey = staticKey(sequence[0])
+	}
+
+	if isStatic {
+		if r.static[m] == nil {
+			r.static[m] = make(map[string]*T)
+		}
+
+		r.static[m][sKey] = &handler
+
+		return nil
 	}
 
 	insert(&r.nodes[m], 0, sequence, &handler)
@@ -51,6 +71,12 @@ func (r *Router[T]) Search(method string, path string, params *Params) *T {
 		path = "/" + path
 	}
 
+	if static := r.static[m]; static != nil {
+		if h, ok := static[staticKey(path)]; ok {
+			return h
+		}
+	}
+
 	h := search(&r.nodes[m][0], r.nodes[m], path, 0, params)
 	if h == nil {
 		params.reset()
@@ -72,8 +98,8 @@ func (r *Router[T]) Remove(method string, path string) {
 		return
 	}
 
-	if !strings.HasPrefix(path, "/") {
-		path = "/" + path
+	if isStaticSequence(sequence) && r.static[m] != nil {
+		delete(r.static[m], staticKey(sequence[0]))
 	}
 
 	if r.nodes[m] == nil {

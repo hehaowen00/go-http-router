@@ -12,11 +12,11 @@ type node[T any] struct {
 	handler      *T
 	hasParams    bool
 	hasCatchAll  bool
+	catchAllNode nodePtr
 	fingerprint  []byte
 	children     []nodePtr
 	wildcard     []wildcard
 	catchAllName string
-	catchAllNode nodePtr
 }
 
 func (n *node[T]) appendFingerprint(b byte) {
@@ -149,12 +149,8 @@ func search[T any](
 		segmentStart++
 	}
 
-	segmentEnd := strings.IndexByte(path[segmentStart:], '/')
-	if segmentEnd == -1 {
-		segmentEnd = len(path) - segmentStart
-	}
-
-	value := path[segmentStart : segmentStart+segmentEnd]
+	segmentEnd := nextSlash(path, segmentStart, len(path))
+	value := path[segmentStart:segmentEnd]
 
 	if len(n.wildcard) == 1 && !n.hasCatchAll {
 		wc := &n.wildcard[0]
@@ -164,7 +160,7 @@ func search[T any](
 			&nodes[wc.node],
 			nodes,
 			path,
-			segmentStart+segmentEnd,
+			segmentEnd,
 			params,
 		)
 		return h
@@ -180,7 +176,7 @@ func search[T any](
 			&nodes[wc.node],
 			nodes,
 			path,
-			segmentStart+segmentEnd,
+			segmentEnd,
 			params,
 		)
 		if h != nil {

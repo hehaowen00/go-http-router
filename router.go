@@ -6,9 +6,10 @@ import (
 )
 
 type Router[T any] struct {
-	static   [methodCount]map[string]handlerPtr
-	nodes    [methodCount][]node
-	handlers [methodCount][]T
+	static       [methodCount]map[string]handlerPtr
+	staticMaxLen [methodCount]int
+	nodes        [methodCount][]node
+	handlers     [methodCount][]T
 }
 
 func New[T any]() *Router[T] {
@@ -25,6 +26,10 @@ func (r *Router[T]) Add(method string, path string, handler T) error {
 
 	if !strings.ContainsAny(path, ":*") {
 		key := normalizeStaticPath(path)
+		if len(key) > r.staticMaxLen[m] {
+			r.staticMaxLen[m] = len(key)
+		}
+
 		idx := handlerPtr(len(r.handlers[m]))
 		r.handlers[m] = append(r.handlers[m], handler)
 		if r.static[m] == nil {
@@ -67,9 +72,11 @@ func (r *Router[T]) Search(method string, path string, params *Params) *T {
 		path = "/" + path
 	}
 
-	if static := r.static[m]; static != nil {
-		if idx, ok := static[staticKey(path)]; ok {
-			return r.handlerAt(m, idx)
+	if key := staticKey(path); len(key) <= r.staticMaxLen[m] {
+		if static := r.static[m]; static != nil {
+			if idx, ok := static[key]; ok {
+				return r.handlerAt(m, idx)
+			}
 		}
 	}
 

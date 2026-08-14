@@ -7,7 +7,7 @@ import (
 
 type Router[T any] struct {
 	static   [methodCount]map[string]handlerPtr
-	nodes    [methodCount][]node[T]
+	nodes    [methodCount][]node
 	handlers [methodCount][]T
 }
 
@@ -18,12 +18,23 @@ func New[T any]() *Router[T] {
 }
 
 func (r *Router[T]) Add(method string, path string, handler T) error {
-	sequence := splitPath(path)
-
 	m := methodToEnum(method)
 	if m == methodNotFound {
 		return fmt.Errorf("unsupported method - %s", method)
 	}
+
+	if !strings.ContainsAny(path, ":*") {
+		key := normalizeStaticPath(path)
+		idx := handlerPtr(len(r.handlers[m]))
+		r.handlers[m] = append(r.handlers[m], handler)
+		if r.static[m] == nil {
+			r.static[m] = make(map[string]handlerPtr)
+		}
+		r.static[m][key] = idx
+		return nil
+	}
+
+	sequence := splitPath(path)
 
 	err := validateSeq(sequence)
 	if err != nil {
@@ -31,22 +42,13 @@ func (r *Router[T]) Add(method string, path string, handler T) error {
 	}
 
 	if r.nodes[m] == nil {
-		r.nodes[m] = make([]node[T], 1, 64)
+		r.nodes[m] = make([]node, 1, 64)
 		r.nodes[m][0].handlerIdx = -1
+		r.nodes[m][0].slashChild = -1
 	}
 
 	idx := handlerPtr(len(r.handlers[m]))
 	r.handlers[m] = append(r.handlers[m], handler)
-
-	if isStatic := isStaticSequence(sequence); isStatic {
-		if r.static[m] == nil {
-			r.static[m] = make(map[string]handlerPtr)
-		}
-
-		r.static[m][staticKey(sequence[0])] = idx
-
-		return nil
-	}
 
 	insert(&r.nodes[m], 0, sequence, idx)
 
@@ -61,10 +63,6 @@ func (r *Router[T]) Search(method string, path string, params *Params) *T {
 		return nil
 	}
 
-	if r.nodes[m] == nil {
-		return nil
-	}
-
 	if !strings.HasPrefix(path, "/") {
 		path = "/" + path
 	}
@@ -73,6 +71,10 @@ func (r *Router[T]) Search(method string, path string, params *Params) *T {
 		if idx, ok := static[staticKey(path)]; ok {
 			return r.handlerAt(m, idx)
 		}
+	}
+
+	if r.nodes[m] == nil {
+		return nil
 	}
 
 	idx := search(&r.nodes[m][0], r.nodes[m], path, 0, params)
@@ -89,21 +91,24 @@ func (r *Router[T]) handlerAt(m methodEnum, idx handlerPtr) *T {
 }
 
 func (r *Router[T]) Remove(method string, path string) {
-	sequence := splitPath(path)
-
-	err := validateSeq(sequence)
-	if err != nil {
-		panic(err)
-	}
-
 	m := methodToEnum(method)
 	if m == methodNotFound {
 		return
 	}
 
-	if isStaticSequence(sequence) && r.static[m] != nil {
-		delete(r.static[m], staticKey(sequence[0]))
+	if !strings.ContainsAny(path, ":*") {
+		if r.static[m] != nil {
+			delete(r.static[m], normalizeStaticPath(path))
+		}
+
 		return
+	}
+
+	sequence := splitPath(path)
+
+	err := validateSeq(sequence)
+	if err != nil {
+		panic(err)
 	}
 
 	if r.nodes[m] == nil {

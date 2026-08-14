@@ -98,8 +98,17 @@ func validateSeq(xs []string) error {
 
 	for i := range xs {
 		k := xs[i]
-		if k[0] != ':' {
 
+		if k[0] != ':' && k[0] != '*' {
+			continue
+		}
+
+		if k[0] == '*' && i != len(xs)-1 {
+			return fmt.Errorf("catch all segment must be the last segment")
+		}
+
+		if k == ":" || k == "*" {
+			return fmt.Errorf("param name cannot be empty - %s", k)
 		}
 
 		_, ok := set[k]

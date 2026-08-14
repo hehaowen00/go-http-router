@@ -36,7 +36,7 @@ func (n *node[T]) isEmpty() bool {
 }
 
 func (n *node[T]) recomputeHasParams(nodes []node[T]) bool {
-	if len(n.wildcard) > 0 {
+	if len(n.wildcard) > 0 || n.catchAll != nil {
 		return true
 	}
 
@@ -88,7 +88,6 @@ func search[T any](
 	params *Params,
 ) *T {
 	n := &nodes[nodeIdx]
-
 	l := len(path)
 
 	if idx == l || (idx == l-1 && path[idx] == '/') {
@@ -141,7 +140,7 @@ func search[T any](
 		break
 	}
 
-	if len(n.wildcard) == 0 && n.catchAll == nil {
+	if !n.hasParams {
 		return nil
 	}
 
@@ -204,6 +203,7 @@ func insert[T any](
 
 		if n.catchAll == nil {
 			childIdx := newNode(nodes)
+
 			n = &(*nodes)[nodeIdx]
 			n.catchAll = &catchAll{
 				name: name,
@@ -235,6 +235,8 @@ func insert[T any](
 			pathSeq,
 			handler,
 		)
+
+		n = &(*nodes)[nodeIdx]
 
 		if created || newParam {
 			n.hasParams = true
@@ -344,6 +346,21 @@ func remove[T any](nodes []node[T], nodeIdx nodePtr, pathSeq []string) bool {
 
 	currentSegment := pathSeq[0]
 	n := &nodes[nodeIdx]
+
+	if isCatchAll(currentSegment) {
+		if n.catchAll == nil || n.catchAll.name != catchAllName(currentSegment) {
+			return false
+		}
+
+		removed := remove(nodes, n.catchAll.node, pathSeq[1:])
+		if removed && nodes[n.catchAll.node].isEmpty() {
+			n.catchAll = nil
+		}
+
+		n.hasParams = n.recomputeHasParams(nodes)
+
+		return removed
+	}
 
 	if isParam(currentSegment) {
 		name := paramName(currentSegment)

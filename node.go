@@ -211,169 +211,155 @@ func removeWildcardRun(nodes []node, parentIdx nodePtr, wcIdx int, names []strin
 	return false
 }
 
-func search(
-	n *node,
-	nodes []node,
-	path string,
-	idx int,
-	params *Params,
-) handlerPtr {
+type searchFrame struct {
+	n         nodePtr
+	idx       int
+	paramsIdx paramsIndex
+	wi        int
+}
+
+func search(nodes []node, path string, params *Params) handlerPtr {
+	const inlineStack = 8
+
 	l := len(path)
+	n := nodePtr(0)
+	idx := 0
+	wi := 0
+	phase := 0
 
-	if idx >= l {
-		if n.handlerIdx >= 0 {
-			return n.handlerIdx
-		}
+	var stackBuf [inlineStack]searchFrame
+	stack := stackBuf[:0]
 
-		if n.slashChild >= 0 {
-			return nodes[n.slashChild].handlerIdx
-		}
+outer:
+	for {
+		nn := &nodes[n]
 
-		return -1
-	}
+		if phase == 0 {
+			if idx >= l || (idx == l-1 && path[idx] == '/') {
+				if nn.handlerIdx >= 0 {
+					return nn.handlerIdx
+				}
 
-	if idx == l-1 && path[idx] == '/' {
-		if n.handlerIdx >= 0 {
-			return n.handlerIdx
-		}
+				if sc := nn.slashChild; sc >= 0 {
+					return nodes[sc].handlerIdx
+				}
 
-		if n.slashChild >= 0 {
-			return nodes[n.slashChild].handlerIdx
-		}
+				phase = 2
+				continue
+			}
 
-		return -1
-	}
+			b := path[idx]
+			rem := l - idx
 
-	b := path[idx]
-	rem := l - idx
+			for j, c := range nn.children {
+				if b < nn.fingerprint[j] {
+					break
+				}
 
-	for j, c := range n.children {
-		if b < n.fingerprint[j] {
-			break
-		}
+				if b != nn.fingerprint[j] {
+					continue
+				}
 
-		if b != n.fingerprint[j] {
+				child := &nodes[c]
+				pLen := len(child.prefix)
+
+				if pLen <= rem && path[idx:idx+pLen] == child.prefix {
+					if nn.hasParams {
+						stack = append(stack, searchFrame{n, idx, params.save(), 0})
+					}
+
+					n = c
+					idx += pLen
+					continue outer
+				}
+
+				if pLen == rem+1 && child.prefix[pLen-1] == '/' &&
+					path[idx:] == child.prefix[:rem] {
+					if child.handlerIdx >= 0 {
+						return child.handlerIdx
+					}
+				}
+
+				break
+			}
+
+			wi = 0
+			phase = 1
 			continue
 		}
 
-		child := &nodes[c]
-		pLen := len(child.prefix)
+		if phase == 1 {
+			if wi < len(nn.wildcard) {
+				wc := &nn.wildcard[wi]
+				saved := params.save()
 
-		if pLen <= rem && path[idx:idx+pLen] == child.prefix {
-			var paramsIdx paramsIndex
+				next := idx
+				ok := true
+				for _, name := range wc.params {
+					if next >= l {
+						ok = false
+						break
+					}
 
-			if child.hasParams {
-				paramsIdx = params.save()
+					segStart := next
+					if path[segStart] == '/' {
+						segStart++
+					}
+
+					if segStart >= l {
+						ok = false
+						break
+					}
+
+					segEnd := nextSlash(path, segStart, l)
+					params.set(name, path[segStart:segEnd])
+					next = segEnd
+				}
+
+				if !ok {
+					params.restore(saved)
+					wi++
+					continue
+				}
+
+				if len(nn.wildcard) == 1 && !nn.hasCatchAll {
+					n = wc.node
+					idx = next
+					phase = 0
+					continue outer
+				}
+
+				stack = append(stack, searchFrame{n, idx, saved, wi + 1})
+				n = wc.node
+				idx = next
+				phase = 0
+				continue outer
 			}
 
-			h := search(child, nodes, path, idx+pLen, params)
-			if h >= 0 {
-				return h
+			if nn.hasCatchAll {
+				params.set(nn.catchAllName, strings.TrimPrefix(path[idx:], "/"))
+				n = nn.catchAllNode
+				idx = l
+				phase = 0
+				continue outer
 			}
 
-			if child.hasParams {
-				params.restore(paramsIdx)
-			}
-		} else if pLen == rem+1 && child.prefix[pLen-1] == '/' &&
-			path[idx:] == child.prefix[:rem] {
-			if child.handlerIdx >= 0 {
-				return child.handlerIdx
-			}
+			phase = 2
+			continue
 		}
 
-		break
-	}
-
-	if !n.hasParams {
-		return -1
-	}
-
-	if len(n.wildcard) == 0 && !n.hasCatchAll {
-		return -1
-	}
-
-	if len(n.wildcard) == 1 && !n.hasCatchAll {
-		wc := &n.wildcard[0]
-
-		next := idx
-		for _, name := range wc.params {
-			if next >= l {
-				return -1
-			}
-
-			segStart := next
-			if path[segStart] == '/' {
-				segStart++
-			}
-
-			if segStart >= l {
-				return -1
-			}
-
-			segEnd := nextSlash(path, segStart, l)
-			params.set(name, path[segStart:segEnd])
-			next = segEnd
+		if len(stack) == 0 {
+			return -1
 		}
 
-		return search(
-			&nodes[wc.node],
-			nodes,
-			path,
-			next,
-			params,
-		)
+		f := stack[len(stack)-1]
+		stack = stack[:len(stack)-1]
+		params.restore(f.paramsIdx)
+		n = f.n
+		idx = f.idx
+		wi = f.wi
+		phase = 1
 	}
-
-	for wi := 0; wi < len(n.wildcard); wi++ {
-		paramsIdx := params.save()
-
-		wc := &n.wildcard[wi]
-
-		next := idx
-		ok := true
-		for _, name := range wc.params {
-			if next >= l {
-				ok = false
-				break
-			}
-
-			segStart := next
-			if path[segStart] == '/' {
-				segStart++
-			}
-
-			if segStart >= l {
-				ok = false
-				break
-			}
-
-			segEnd := nextSlash(path, segStart, l)
-			params.set(name, path[segStart:segEnd])
-			next = segEnd
-		}
-
-		if ok {
-			h := search(
-				&nodes[wc.node],
-				nodes,
-				path,
-				next,
-				params,
-			)
-			if h >= 0 {
-				return h
-			}
-		}
-
-		params.restore(paramsIdx)
-	}
-
-	if n.hasCatchAll {
-		params.set(n.catchAllName, strings.TrimPrefix(path[idx:], "/"))
-		return search(&nodes[n.catchAllNode], nodes, path, len(path), params)
-	}
-
-	return -1
 }
 
 func insert(

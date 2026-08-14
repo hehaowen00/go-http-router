@@ -14,6 +14,58 @@ func splitPath(path string) []string {
 	return splitPathSlow(path)
 }
 
+func normalizeStaticPath(path string) string {
+	if len(path) == 0 {
+		return "/"
+	}
+
+	if path[0] == '/' {
+		i := 1
+		for i < len(path) && path[i] == '/' {
+			i++
+		}
+
+		end := len(path)
+		for end > i && path[end-1] == '/' {
+			end--
+		}
+
+		if !strings.Contains(path[i:end], "//") {
+			if i == end {
+				return "/"
+			}
+
+			return "/" + path[i:end]
+		}
+	}
+
+	path = strings.TrimSpace(path)
+	if len(path) == 0 {
+		return "/"
+	}
+
+	if path[0] != '/' {
+		path = "/" + path
+	}
+
+	if strings.Contains(path, "//") {
+		path = collapseSlashes(path)
+	}
+
+	i := 1
+	end := len(path)
+
+	for end > i && path[end-1] == '/' {
+		end--
+	}
+
+	if i == end {
+		return "/"
+	}
+
+	return "/" + path[i:end]
+}
+
 func splitPathFast(path string) ([]string, bool) {
 	if path[0] != '/' {
 		return nil, false

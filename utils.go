@@ -89,15 +89,6 @@ func validateSeq(xs []string) error {
 	return nil
 }
 
-func isStaticSequence(sequence []string) bool {
-	if len(sequence) != 1 {
-		return false
-	}
-
-	s := sequence[0]
-	return len(s) > 0 && s[0] != ':' && s[0] != '*'
-}
-
 func staticKey(s string) string {
 	if len(s) > 1 && s[len(s)-1] == '/' {
 		return s[:len(s)-1]

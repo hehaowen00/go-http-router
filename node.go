@@ -9,19 +9,20 @@ type nodePtr int32
 
 type handlerPtr int32
 
-type node[T any] struct {
+type node struct {
 	prefix       string
 	handlerIdx   handlerPtr
 	hasParams    bool
 	hasCatchAll  bool
 	catchAllNode nodePtr
+	slashChild   nodePtr
 	fingerprint  []byte
 	children     []nodePtr
 	wildcard     []wildcard
 	catchAllName string
 }
 
-func (n *node[T]) appendFingerprint(b byte) {
+func (n *node) appendFingerprint(b byte) {
 	if cap(n.fingerprint) == 0 {
 		n.fingerprint = make([]byte, 0, 4)
 	}
@@ -29,12 +30,12 @@ func (n *node[T]) appendFingerprint(b byte) {
 	n.fingerprint = append(n.fingerprint, b)
 }
 
-func (n *node[T]) isEmpty() bool {
+func (n *node) isEmpty() bool {
 	return n.handlerIdx < 0 && len(n.children) == 0 && len(n.wildcard) == 0 &&
 		!n.hasCatchAll
 }
 
-func (n *node[T]) recomputeHasParams(nodes []node[T]) bool {
+func (n *node) recomputeHasParams(nodes []node) bool {
 	if len(n.wildcard) > 0 || n.hasCatchAll {
 		return true
 	}
@@ -53,14 +54,12 @@ type wildcard struct {
 	node nodePtr
 }
 
-func newNode[T any](nodes *[]node[T]) nodePtr {
-	// handlerIdx defaults to -1: a zero value of 0 would alias a real
-	// handler in the arena.
-	*nodes = append(*nodes, node[T]{handlerIdx: -1})
+func newNode(nodes *[]node) nodePtr {
+	*nodes = append(*nodes, node{handlerIdx: -1, slashChild: -1})
 	return nodePtr(len(*nodes) - 1)
 }
 
-func getWildcard[T any](nodes *[]node[T], idx nodePtr, name string) (int32, bool) {
+func getWildcard(nodes *[]node, idx nodePtr, name string) (int32, bool) {
 	n := &(*nodes)[idx]
 
 	for i := range n.wildcard {
@@ -80,9 +79,9 @@ func getWildcard[T any](nodes *[]node[T], idx nodePtr, name string) (int32, bool
 	return int32(len(n.wildcard) - 1), true
 }
 
-func search[T any](
-	n *node[T],
-	nodes []node[T],
+func search(
+	n *node,
+	nodes []node,
 	path string,
 	idx int,
 	params *Params,
@@ -94,10 +93,8 @@ func search[T any](
 			return n.handlerIdx
 		}
 
-		for _, c := range n.children {
-			if nodes[c].prefix == "/" {
-				return nodes[c].handlerIdx
-			}
+		if n.slashChild >= 0 {
+			return nodes[n.slashChild].handlerIdx
 		}
 
 		return -1
@@ -197,8 +194,8 @@ func search[T any](
 	return -1
 }
 
-func insert[T any](
-	nodes *[]node[T],
+func insert(
+	nodes *[]node,
 	nodeIdx nodePtr,
 	pathSeq []string,
 	handlerIdx handlerPtr,
@@ -287,6 +284,10 @@ func insert[T any](
 		n.children = append(n.children, childIdx)
 		n.appendFingerprint((*nodes)[childIdx].prefix[0])
 
+		if currentSegment == "/" {
+			n.slashChild = childIdx
+		}
+
 		if newParam {
 			n.hasParams = true
 		}
@@ -317,6 +318,7 @@ func insert[T any](
 	}
 
 	if len(closest.prefix) > best {
+		oldChildIdx := n.children[closestIdx]
 		newChildIdx := newNode(nodes)
 		n = &(*nodes)[nodeIdx]
 		closest = &(*nodes)[n.children[closestIdx]]
@@ -329,6 +331,12 @@ func insert[T any](
 		newChild.appendFingerprint(closest.prefix[0])
 
 		n.children[closestIdx] = newChildIdx
+
+		if newChild.prefix == "/" {
+			n.slashChild = newChildIdx
+		} else if closest.prefix == "/" {
+			newChild.slashChild = oldChildIdx
+		}
 
 		if best >= len(currentSegment) {
 			pathSeq = pathSeq[1:]
@@ -348,7 +356,7 @@ func insert[T any](
 	return false
 }
 
-func remove[T any](nodes []node[T], nodeIdx nodePtr, pathSeq []string) bool {
+func remove(nodes []node, nodeIdx nodePtr, pathSeq []string) bool {
 	if len(pathSeq) == 0 {
 		n := &nodes[nodeIdx]
 
@@ -448,6 +456,10 @@ func remove[T any](nodes []node[T], nodeIdx nodePtr, pathSeq []string) bool {
 	if nodes[childIdx].isEmpty() {
 		n.children = slices.Delete(n.children, closestIdx, closestIdx+1)
 		n.fingerprint = slices.Delete(n.fingerprint, closestIdx, closestIdx+1)
+
+		if n.slashChild == childIdx {
+			n.slashChild = -1
+		}
 	}
 
 	n.hasParams = n.recomputeHasParams(nodes)

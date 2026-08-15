@@ -262,6 +262,43 @@ type searchFrame struct {
 	wi        int
 }
 
+func (n *node) canBacktrack(path string, idx, l, wi int) bool {
+	if n.flags&flagHasCatchAll != 0 {
+		return true
+	}
+
+	need := 0
+	for i := wi; i < len(n.wildcard); i++ {
+		if p := len(n.wildcard[i].params); need == 0 || p < need {
+			need = p
+		}
+	}
+
+	if need == 0 {
+		return false
+	}
+
+	next := idx
+	for c := 0; c < need; c++ {
+		if next >= l {
+			return false
+		}
+
+		segStart := next
+		if path[segStart] == '/' {
+			segStart++
+		}
+
+		if segStart >= l {
+			return false
+		}
+
+		next = nextSlash(path, segStart, l)
+	}
+
+	return true
+}
+
 func search(nodes []node, path string, params *Params) handlerPtr {
 	l := len(path)
 	n := nodePtr(0)
@@ -399,6 +436,13 @@ descent:
 			}
 
 			if wi == len(nn.wildcard)-1 && nn.flags&flagHasCatchAll == 0 {
+				n = wc.node
+				idx = next
+				nn = &nodes[n]
+				continue descent
+			}
+
+			if !nn.canBacktrack(path, idx, l, wi+1) {
 				n = wc.node
 				idx = next
 				nn = &nodes[n]

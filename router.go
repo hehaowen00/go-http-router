@@ -8,6 +8,7 @@ import (
 
 type Router[T any] struct {
 	static       [methodCount]map[string]handlerPtr
+	staticMinLen [methodCount]int
 	staticMaxLen [methodCount]int
 	nodes        [methodCount][]node
 	handlers     [methodCount][]T
@@ -31,6 +32,9 @@ func (r *Router[T]) Add(method string, path string, handler T) error {
 
 	if !strings.ContainsAny(path, ":*") {
 		key := normalizeStaticPath(path)
+		if r.staticMinLen[m] == 0 || len(key) < r.staticMinLen[m] {
+			r.staticMinLen[m] = len(key)
+		}
 		if len(key) > r.staticMaxLen[m] {
 			r.staticMaxLen[m] = len(key)
 		}
@@ -80,7 +84,7 @@ func (r *Router[T]) Search(method string, path string, params *Params) *T {
 		path = "/" + path
 	}
 
-	if key := staticKey(path); len(key) <= r.staticMaxLen[m] {
+	if key := staticKey(path); len(key) >= r.staticMinLen[m] && len(key) <= r.staticMaxLen[m] {
 		if static := r.static[m]; static != nil {
 			if idx, ok := static[key]; ok {
 				return r.handlerAt(m, idx)
@@ -105,6 +109,23 @@ func (r *Router[T]) handlerAt(m methodEnum, idx handlerPtr) *T {
 	return &r.handlers[m][idx]
 }
 
+func (r *Router[T]) refreshStaticLenBounds(m methodEnum) {
+	minLen := 0
+	maxLen := 0
+
+	for key := range r.static[m] {
+		if minLen == 0 || len(key) < minLen {
+			minLen = len(key)
+		}
+		if len(key) > maxLen {
+			maxLen = len(key)
+		}
+	}
+
+	r.staticMinLen[m] = minLen
+	r.staticMaxLen[m] = maxLen
+}
+
 func (r *Router[T]) Remove(method string, path string) {
 	m := methodToEnum(method)
 	if m == methodNotFound {
@@ -117,6 +138,10 @@ func (r *Router[T]) Remove(method string, path string) {
 			if idx, ok := r.static[m][key]; ok {
 				delete(r.static[m], key)
 				r.removeHandler(m, idx)
+
+				if len(key) == r.staticMinLen[m] || len(key) == r.staticMaxLen[m] {
+					r.refreshStaticLenBounds(m)
+				}
 			}
 		}
 
@@ -134,7 +159,9 @@ func (r *Router[T]) Remove(method string, path string) {
 		return
 	}
 
-	remove(r.nodes[m], 0, sequence)
+	if remove(r.nodes[m], 0, sequence) {
+		r.nodes[m] = compactNodes(r.nodes[m])
+	}
 }
 
 func (r *Router[T]) removeHandler(m methodEnum, removed handlerPtr) {

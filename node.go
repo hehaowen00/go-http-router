@@ -95,6 +95,58 @@ func newNode(nodes *[]node) nodePtr {
 	return nodePtr(len(*nodes) - 1)
 }
 
+func compactNodes(nodes []node) []node {
+	empty := 0
+	for i := 1; i < len(nodes); i++ {
+		if nodes[i].isEmpty() {
+			empty++
+		}
+	}
+
+	if empty == 0 {
+		return nodes
+	}
+
+	mapping := make([]nodePtr, len(nodes))
+	for i := range mapping {
+		mapping[i] = -1
+	}
+
+	compacted := make([]node, 0, len(nodes)-empty)
+	for i := range nodes {
+		if i == 0 || !nodes[i].isEmpty() {
+			mapping[i] = nodePtr(len(compacted))
+			compacted = append(compacted, nodes[i])
+		}
+	}
+
+	if compacted[0].isEmpty() {
+		compacted[0] = node{handlerIdx: -1, slashChild: -1}
+	}
+
+	for i := range compacted {
+		n := &compacted[i]
+
+		if n.slashChild >= 0 {
+			n.slashChild = mapping[n.slashChild]
+		}
+
+		if n.catchAllNode >= 0 {
+			n.catchAllNode = mapping[n.catchAllNode]
+		}
+
+		for j := range n.children {
+			n.children[j].node = mapping[n.children[j].node]
+		}
+
+		for j := range n.wildcard {
+			n.wildcard[j].node = mapping[n.wildcard[j].node]
+		}
+	}
+
+	return compacted
+}
+
 func collectParamRun(pathSeq []string) []string {
 	i := 0
 	for i < len(pathSeq) && isParam(pathSeq[i]) {

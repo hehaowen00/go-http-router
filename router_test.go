@@ -163,6 +163,42 @@ func BenchmarkRouterGithub(b *testing.B) {
 	}
 }
 
+func BenchmarkRouterGithubParallel(b *testing.B) {
+	r := New[int]()
+	for i, route := range githubAPI {
+		if err := r.Add(route[0], route[1], i); err != nil {
+			b.Fatal(err)
+		}
+	}
+
+	reqs := make([]struct{ method, path string }, len(githubAPI))
+	for i, route := range githubAPI {
+		reqs[i] = struct{ method, path string }{method: route[0], path: concretePath(route[1])}
+	}
+
+	for _, req := range reqs {
+		params := Params{}
+		if r.Search(req.method, req.path, &params) == nil {
+			b.Fatalf("route not found: %s %s", req.method, req.path)
+		}
+	}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	b.RunParallel(func(pb *testing.PB) {
+		params := Params{}
+
+		for pb.Next() {
+			for _, req := range reqs {
+				if r.Search(req.method, req.path, &params) == nil {
+					b.Errorf("route not found: %s %s", req.method, req.path)
+				}
+			}
+		}
+	})
+}
+
 func BenchmarkRouterGithubAll(b *testing.B) {
 	r := New[int]()
 	for i, route := range githubAPI {

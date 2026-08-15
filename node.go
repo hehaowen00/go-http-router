@@ -384,7 +384,7 @@ descent:
 				continue
 			}
 
-			if len(nn.wildcard) == 1 && nn.flags&flagHasCatchAll == 0 {
+			if wi == len(nn.wildcard)-1 && nn.flags&flagHasCatchAll == 0 {
 				n = wc.node
 				idx = next
 				nn = &nodes[n]
@@ -581,7 +581,8 @@ func remove(nodes []node, nodeIdx nodePtr, pathSeq []string) bool {
 	n := &nodes[nodeIdx]
 
 	if isCatchAll(currentSegment) {
-		if n.flags&flagHasCatchAll == 0 || n.catchAllName != catchAllName(currentSegment) {
+		if n.flags&flagHasCatchAll == 0 ||
+			n.catchAllName != catchAllName(currentSegment) {
 			return false
 		}
 

@@ -2,6 +2,7 @@ package gohttprouter
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 )
 
@@ -35,6 +36,7 @@ func (r *Router[T]) Add(method string, path string, handler T) error {
 		if r.static[m] == nil {
 			r.static[m] = make(map[string]handlerPtr)
 		}
+
 		r.static[m][key] = idx
 		return nil
 	}
@@ -107,7 +109,11 @@ func (r *Router[T]) Remove(method string, path string) {
 
 	if !strings.ContainsAny(path, ":*") {
 		if r.static[m] != nil {
-			delete(r.static[m], normalizeStaticPath(path))
+			key := normalizeStaticPath(path)
+			if idx, ok := r.static[m][key]; ok {
+				delete(r.static[m], key)
+				r.removeHandler(m, idx)
+			}
 		}
 
 		return
@@ -125,4 +131,34 @@ func (r *Router[T]) Remove(method string, path string) {
 	}
 
 	remove(r.nodes[m], 0, sequence)
+}
+
+func (r *Router[T]) removeHandler(m methodEnum, removed handlerPtr) {
+	handlers := r.handlers[m]
+	n := len(handlers)
+
+	if int(removed) < 0 || int(removed) >= n {
+		return
+	}
+
+	if int(removed) == n-1 {
+		var zero T
+		handlers[n-1] = zero
+		r.handlers[m] = handlers[:n-1]
+		return
+	}
+
+	r.handlers[m] = slices.Delete(handlers, int(removed), int(removed)+1)
+
+	for key, idx := range r.static[m] {
+		if idx > removed {
+			r.static[m][key] = idx - 1
+		}
+	}
+
+	for i := range r.nodes[m] {
+		if r.nodes[m][i].handlerIdx > removed {
+			r.nodes[m][i].handlerIdx--
+		}
+	}
 }

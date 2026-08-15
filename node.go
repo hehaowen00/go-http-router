@@ -286,6 +286,20 @@ descent:
 
 		{
 			b := path[idx]
+
+			if b == '/' {
+				if sc := nn.slashChild; sc >= 0 {
+					if nn.flags&(flagHasWildcard|flagHasCatchAll) != 0 {
+						stack = append(stack, searchFrame{n, idx, params.save(), 0})
+					}
+
+					n = sc
+					idx++
+					nn = &nodes[n]
+					continue descent
+				}
+			}
+
 			rem := l - idx
 
 			for _, c := range nn.children {

@@ -9,17 +9,35 @@ type nodePtr int32
 
 type handlerPtr int32
 
+const (
+	flagHasParams uint8 = 1 << iota
+	flagHasCatchAll
+	flagHasWildcard
+)
+
+func setFlag(flags *uint8, bit uint8, v bool) {
+	if v {
+		*flags |= bit
+	} else {
+		*flags &^= bit
+	}
+}
+
 type node struct {
 	prefix       string
 	handlerIdx   handlerPtr
-	hasParams    bool
-	hasCatchAll  bool
-	catchAllNode nodePtr
 	slashChild   nodePtr
+	catchAllNode nodePtr
+	flags        uint8
 	fingerprint  []byte
 	children     []nodePtr
 	wildcard     []wildcard
 	catchAllName string
+}
+
+type wildcard struct {
+	params []string
+	node   nodePtr
 }
 
 func (n *node) appendFingerprint(b byte) {
@@ -37,27 +55,22 @@ func (n *node) addChild(childIdx nodePtr, b byte) {
 }
 
 func (n *node) isEmpty() bool {
-	return n.handlerIdx < 0 && len(n.children) == 0 && len(n.wildcard) == 0 &&
-		!n.hasCatchAll
+	return n.handlerIdx < 0 && len(n.children) == 0 &&
+		n.flags&(flagHasWildcard|flagHasCatchAll) == 0
 }
 
 func (n *node) recomputeHasParams(nodes []node) bool {
-	if len(n.wildcard) > 0 || n.hasCatchAll {
+	if len(n.wildcard) > 0 || n.flags&flagHasCatchAll != 0 {
 		return true
 	}
 
 	for _, c := range n.children {
-		if nodes[c].hasParams {
+		if nodes[c].flags&flagHasParams != 0 {
 			return true
 		}
 	}
 
 	return false
-}
-
-type wildcard struct {
-	params []string
-	node   nodePtr
 }
 
 func newNode(nodes *[]node) nodePtr {
@@ -99,7 +112,7 @@ func insertParamRun(
 
 		n = &(*nodes)[nodeIdx]
 		if newParam {
-			n.hasParams = true
+			n.flags |= flagHasParams
 		}
 
 		return newParam
@@ -112,7 +125,7 @@ func insertParamRun(
 		params: names,
 		node:   childIdx,
 	})
-	n.hasParams = true
+	n.flags |= flagHasWildcard | flagHasParams
 
 	insert(nodes, childIdx, rest, handlerIdx)
 
@@ -155,7 +168,7 @@ func splitWildcard(nodes *[]node, parentIdx nodePtr, wcIdx int, cp int) {
 	newIdx := newNode(nodes)
 	moved := &(*nodes)[newIdx]
 
-	moved.hasParams = true
+	moved.flags |= flagHasParams | flagHasWildcard
 	moved.wildcard = []wildcard{{params: remainder, node: oldNode}}
 
 	wc.node = newIdx
@@ -182,8 +195,9 @@ func removeParamRun(
 		n = &nodes[nodeIdx]
 		if nodes[n.wildcard[i].node].isEmpty() {
 			n.wildcard = slices.Delete(n.wildcard, i, i+1)
+			setFlag(&n.flags, flagHasWildcard, len(n.wildcard) > 0)
 		}
-		n.hasParams = n.recomputeHasParams(nodes)
+		setFlag(&n.flags, flagHasParams, n.recomputeHasParams(nodes))
 
 		return true
 	}
@@ -226,8 +240,9 @@ func removeWildcardRun(
 		cont = &nodes[wc.node]
 		if nodes[cont.wildcard[i].node].isEmpty() {
 			cont.wildcard = slices.Delete(cont.wildcard, i, i+1)
+			setFlag(&cont.flags, flagHasWildcard, len(cont.wildcard) > 0)
 		}
-		cont.hasParams = cont.recomputeHasParams(nodes)
+		setFlag(&cont.flags, flagHasParams, cont.recomputeHasParams(nodes))
 
 		return true
 	}
@@ -280,8 +295,19 @@ descent:
 				child := &nodes[c]
 				pLen := len(child.prefix)
 
+				if pLen == 1 {
+					if nn.flags&(flagHasWildcard|flagHasCatchAll) != 0 {
+						stack = append(stack, searchFrame{n, idx, params.save(), 0})
+					}
+
+					n = c
+					idx++
+					nn = child
+					continue descent
+				}
+
 				if pLen <= rem && path[idx:idx+pLen] == child.prefix {
-					if len(nn.wildcard) > 0 || nn.hasCatchAll {
+					if nn.flags&(flagHasWildcard|flagHasCatchAll) != 0 {
 						stack = append(stack, searchFrame{n, idx, params.save(), 0})
 					}
 
@@ -353,7 +379,7 @@ descent:
 				continue
 			}
 
-			if len(nn.wildcard) == 1 && !nn.hasCatchAll {
+			if len(nn.wildcard) == 1 && nn.flags&flagHasCatchAll == 0 {
 				n = wc.node
 				idx = next
 				nn = &nodes[n]
@@ -367,7 +393,7 @@ descent:
 			continue descent
 		}
 
-		if nn.hasCatchAll {
+		if nn.flags&flagHasCatchAll != 0 {
 			params.set(nn.catchAllName, strings.TrimPrefix(path[idx:], "/"))
 			n = nn.catchAllNode
 			idx = l
@@ -396,13 +422,13 @@ func insert(
 	if isCatchAll(currentSegment) {
 		name := catchAllName(currentSegment)
 
-		if !n.hasCatchAll {
+		if n.flags&flagHasCatchAll == 0 {
 			childIdx := newNode(nodes)
 
 			n = &(*nodes)[nodeIdx]
 			n.catchAllName = name
 			n.catchAllNode = childIdx
-			n.hasCatchAll = true
+			n.flags |= flagHasCatchAll
 		} else {
 			n = &(*nodes)[nodeIdx]
 			n.catchAllName = name
@@ -411,7 +437,7 @@ func insert(
 		insert(nodes, n.catchAllNode, pathSeq[1:], handlerIdx)
 
 		n = &(*nodes)[nodeIdx]
-		n.hasParams = true
+		n.flags |= flagHasParams
 
 		return true
 	}
@@ -466,7 +492,7 @@ func insert(
 		}
 
 		if newParam {
-			n.hasParams = true
+			n.flags |= flagHasParams
 		}
 
 		return newParam
@@ -488,7 +514,7 @@ func insert(
 		)
 
 		if newParam {
-			(*nodes)[nodeIdx].hasParams = true
+			(*nodes)[nodeIdx].flags |= flagHasParams
 		}
 
 		return newParam
@@ -502,7 +528,7 @@ func insert(
 
 		newChild := &(*nodes)[newChildIdx]
 		newChild.prefix = closest.prefix[:best]
-		newChild.hasParams = closest.hasParams
+		newChild.flags = closest.flags & flagHasParams
 		closest.prefix = closest.prefix[best:]
 		newChild.children = append(newChild.children, n.children[closestIdx])
 		newChild.appendFingerprint(closest.prefix[0])
@@ -524,7 +550,7 @@ func insert(
 		newParam = insert(nodes, newChildIdx, pathSeq, handlerIdx)
 
 		if newParam {
-			(*nodes)[nodeIdx].hasParams = true
+			(*nodes)[nodeIdx].flags |= flagHasParams
 		}
 
 		return newParam
@@ -549,17 +575,17 @@ func remove(nodes []node, nodeIdx nodePtr, pathSeq []string) bool {
 	n := &nodes[nodeIdx]
 
 	if isCatchAll(currentSegment) {
-		if !n.hasCatchAll || n.catchAllName != catchAllName(currentSegment) {
+		if n.flags&flagHasCatchAll == 0 || n.catchAllName != catchAllName(currentSegment) {
 			return false
 		}
 
 		removed := remove(nodes, n.catchAllNode, pathSeq[1:])
 		if removed && nodes[n.catchAllNode].isEmpty() {
-			n.hasCatchAll = false
+			n.flags &^= flagHasCatchAll
 			n.catchAllName = ""
 		}
 
-		n.hasParams = n.recomputeHasParams(nodes)
+		setFlag(&n.flags, flagHasParams, n.recomputeHasParams(nodes))
 
 		return removed
 	}
@@ -628,7 +654,7 @@ func remove(nodes []node, nodeIdx nodePtr, pathSeq []string) bool {
 		}
 	}
 
-	n.hasParams = n.recomputeHasParams(nodes)
+	setFlag(&n.flags, flagHasParams, n.recomputeHasParams(nodes))
 
 	return true
 }

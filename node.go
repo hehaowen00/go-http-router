@@ -42,6 +42,7 @@ type child struct {
 type wildcard struct {
 	params []string
 	node   nodePtr
+	minRun uint8
 }
 
 func (n *node) addChild(childIdx nodePtr, b byte) {
@@ -62,6 +63,17 @@ func (n *node) appendChild(childIdx nodePtr, b byte) {
 func (n *node) isEmpty() bool {
 	return n.handlerIdx < 0 && len(n.children) == 0 &&
 		n.flags&(flagHasWildcard|flagHasCatchAll) == 0
+}
+
+func (n *node) recomputeWildcardMinRuns() {
+	m := uint8(0)
+	for i := len(n.wildcard) - 1; i >= 0; i-- {
+		p := uint8(len(n.wildcard[i].params))
+		if m == 0 || p < m {
+			m = p
+		}
+		n.wildcard[i].minRun = m
+	}
 }
 
 func (n *node) recomputeHasParams(nodes []node) bool {
@@ -130,6 +142,7 @@ func insertParamRun(
 		params: names,
 		node:   childIdx,
 	})
+	n.recomputeWildcardMinRuns()
 	n.flags |= flagHasWildcard | flagHasParams
 
 	insert(nodes, childIdx, rest, handlerIdx)
@@ -175,8 +188,10 @@ func splitWildcard(nodes *[]node, parentIdx nodePtr, wcIdx int, cp int) {
 
 	moved.flags |= flagHasParams | flagHasWildcard
 	moved.wildcard = []wildcard{{params: remainder, node: oldNode}}
+	moved.recomputeWildcardMinRuns()
 
 	wc.node = newIdx
+	(*nodes)[parentIdx].recomputeWildcardMinRuns()
 }
 
 func removeParamRun(
@@ -200,6 +215,7 @@ func removeParamRun(
 		n = &nodes[nodeIdx]
 		if nodes[n.wildcard[i].node].isEmpty() {
 			n.wildcard = slices.Delete(n.wildcard, i, i+1)
+			n.recomputeWildcardMinRuns()
 			setFlag(&n.flags, flagHasWildcard, len(n.wildcard) > 0)
 		}
 		setFlag(&n.flags, flagHasParams, n.recomputeHasParams(nodes))
@@ -245,6 +261,7 @@ func removeWildcardRun(
 		cont = &nodes[wc.node]
 		if nodes[cont.wildcard[i].node].isEmpty() {
 			cont.wildcard = slices.Delete(cont.wildcard, i, i+1)
+			cont.recomputeWildcardMinRuns()
 			setFlag(&cont.flags, flagHasWildcard, len(cont.wildcard) > 0)
 		}
 		setFlag(&cont.flags, flagHasParams, cont.recomputeHasParams(nodes))
@@ -262,18 +279,46 @@ type searchFrame struct {
 	wi        int
 }
 
+const inlineFrames = 4
+
+type frameStack struct {
+	frames [inlineFrames]searchFrame
+	sp     int
+	spill  []searchFrame
+}
+
+func (s *frameStack) push(f searchFrame) {
+	if s.sp < len(s.frames) {
+		s.frames[s.sp] = f
+		s.sp++
+		return
+	}
+	s.spill = append(s.spill, f)
+}
+
+func (s *frameStack) pop() searchFrame {
+	if len(s.spill) > 0 {
+		f := s.spill[len(s.spill)-1]
+		s.spill = s.spill[:len(s.spill)-1]
+		return f
+	}
+	s.sp--
+	return s.frames[s.sp]
+}
+
+func (s *frameStack) empty() bool {
+	return s.sp == 0 && len(s.spill) == 0
+}
+
 func (n *node) canBacktrack(path string, idx, l, wi int) bool {
 	if n.flags&flagHasCatchAll != 0 {
 		return true
 	}
 
-	need := 0
-	for i := wi; i < len(n.wildcard); i++ {
-		if p := len(n.wildcard[i].params); need == 0 || p < need {
-			need = p
-		}
+	if wi >= len(n.wildcard) {
+		return false
 	}
-
+	need := int(n.wildcard[wi].minRun)
 	if need == 0 {
 		return false
 	}
@@ -305,7 +350,7 @@ func search(nodes []node, path string, params *Params) handlerPtr {
 	idx := 0
 	wi := 0
 	nn := &nodes[n]
-	var stack []searchFrame
+	var stack frameStack
 
 descent:
 	for {
@@ -327,7 +372,7 @@ descent:
 			if b == '/' {
 				if sc := nn.slashChild; sc >= 0 {
 					if nn.flags&(flagHasWildcard|flagHasCatchAll) != 0 {
-						stack = append(stack, searchFrame{n, idx, params.save(), 0})
+						stack.push(searchFrame{n, idx, params.save(), 0})
 					}
 
 					n = sc
@@ -354,7 +399,7 @@ descent:
 
 				if pLen == 1 {
 					if nn.flags&(flagHasWildcard|flagHasCatchAll) != 0 {
-						stack = append(stack, searchFrame{n, idx, params.save(), 0})
+						stack.push(searchFrame{n, idx, params.save(), 0})
 					}
 
 					n = c.node
@@ -365,7 +410,7 @@ descent:
 
 				if pLen <= rem && path[idx:idx+pLen] == child.prefix {
 					if nn.flags&(flagHasWildcard|flagHasCatchAll) != 0 {
-						stack = append(stack, searchFrame{n, idx, params.save(), 0})
+						stack.push(searchFrame{n, idx, params.save(), 0})
 					}
 
 					n = c.node
@@ -389,13 +434,12 @@ descent:
 		goto wildcards
 
 	backtrack:
-		if len(stack) == 0 {
+		if stack.empty() {
 			return -1
 		}
 
 		{
-			f := stack[len(stack)-1]
-			stack = stack[:len(stack)-1]
+			f := stack.pop()
 			params.restore(f.paramsIdx)
 			n = f.n
 			idx = f.idx
@@ -453,7 +497,7 @@ descent:
 				continue descent
 			}
 
-			stack = append(stack, searchFrame{n, idx, saved, wi + 1})
+			stack.push(searchFrame{n, idx, saved, wi + 1})
 			n = wc.node
 			idx = next
 			nn = &nodes[n]

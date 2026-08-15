@@ -14,8 +14,10 @@ const (
 )
 
 func nextSlash(s string, i, end int) int {
+	sd := unsafe.StringData(s)
+
 	for i+8 <= end {
-		w := *(*uint64)(unsafe.Add(unsafe.Pointer(unsafe.StringData(s)), i))
+		w := *(*uint64)(unsafe.Add(unsafe.Pointer(sd), i))
 
 		x := w ^ slashWord
 		m := (x - loWord) &^ x & hiWord

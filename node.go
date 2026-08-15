@@ -339,7 +339,8 @@ descent:
 
 			rem := l - idx
 
-			for _, c := range nn.children {
+			for i := range nn.children {
+				c := nn.children[i]
 				if b < c.b {
 					break
 				}
@@ -409,7 +410,10 @@ descent:
 
 			next := idx
 			ok := true
-			for _, name := range wc.params {
+
+			for i := range wc.params {
+				name := wc.params[i]
+
 				if next >= l {
 					ok = false
 					break

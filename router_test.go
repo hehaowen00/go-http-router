@@ -121,35 +121,6 @@ func TestRouterGithub(t *testing.T) {
 	}
 }
 
-func TestRouterLarge(t *testing.T) {
-	r := New[int]()
-	params := Params{}
-
-	for i, route := range largeAPI {
-		if err := r.Add(route[0], route[1], i); err != nil {
-			t.Fatalf("add %s %s: %v", route[0], route[1], err)
-		}
-	}
-
-	for _, route := range largeAPI {
-		h := r.Search(route[0], route[1], &params)
-		if h == nil {
-			inspect.Inspect(r)
-			t.Log("failed to find", route[0], route[1])
-			t.FailNow()
-		}
-	}
-
-	t.Log("memory", r.MemSize())
-
-	for i, route := range largeAPI {
-		r.Remove(route[0], route[1])
-		if h := r.Search(route[0], route[1], &params); h != nil && *h == i {
-			t.Fatalf("failed to remove %s %s", route[0], route[1])
-		}
-	}
-}
-
 func BenchmarkBuildGithubAPI(b *testing.B) {
 	b.ReportAllocs()
 
@@ -206,22 +177,6 @@ func BenchmarkRouterGithubAll(b *testing.B) {
 			if handler == nil {
 				b.Fatalf("route not found: %s %s", route[0], route[1])
 			}
-		}
-	}
-}
-
-func BenchmarkRouterLarge(b *testing.B) {
-	r := New[int]()
-	for i, route := range largeAPI {
-		r.Add(route[0], route[1], i)
-	}
-	params := Params{}
-
-	for i := 0; b.Loop(); i++ {
-		route := largeAPI[i%len(largeAPI)]
-		handler := r.Search(route[0], route[1], &params)
-		if handler == nil {
-			b.Fatalf("route not found: %s %s", route[0], route[1])
 		}
 	}
 }

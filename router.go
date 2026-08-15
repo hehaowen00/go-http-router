@@ -13,6 +13,10 @@ type Router[T any] struct {
 	handlers     [methodCount][]T
 }
 
+type handler[T any] struct {
+	handlers [methodCount]*T
+}
+
 func New[T any]() *Router[T] {
 	return &Router[T]{
 		static: [methodCount]map[string]handlerPtr{},

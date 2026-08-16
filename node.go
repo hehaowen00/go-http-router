@@ -2,7 +2,6 @@ package gohttprouter
 
 import (
 	"slices"
-	"strings"
 	"unsafe"
 )
 
@@ -562,7 +561,7 @@ descent:
 				}
 
 				segEnd := nextSlash(path, segStart, l)
-				params.set(name, path[segStart:segEnd])
+				params.set(name, int32(segStart), int32(segEnd))
 				next = segEnd
 			}
 
@@ -593,7 +592,11 @@ descent:
 		}
 
 		if nn.flags&flagHasCatchAll != 0 {
-			params.set(nn.catchAllName, strings.TrimPrefix(path[idx:], "/"))
+			start := idx
+			if start < l && path[start] == '/' {
+				start++
+			}
+			params.set(nn.catchAllName, int32(start), int32(l))
 			n = nn.catchAllNode
 			idx = l
 			nn = &nodes[n]

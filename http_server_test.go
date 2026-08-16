@@ -24,6 +24,8 @@ func serve(r *Router[http.HandlerFunc]) http.Handler {
 			return
 		}
 
+		params.Use(req)
+
 		ctx := context.WithValue(req.Context(), paramsCtxKey{}, &params)
 		(*h)(w, req.WithContext(ctx))
 	})

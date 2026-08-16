@@ -22,7 +22,7 @@ func TestStaticLenHashFalseNegatives(t *testing.T) {
 	}
 
 	var huge staticLenFilter
-	for _, n := range []int{1 << 20, 1 << 30, 1 << 40} {
+	for _, n := range []int{1 << 20, 1 << 30, int(1 << 40)} {
 		huge.set(n)
 		if !huge.has(n) {
 			t.Errorf("has(%d) = false, want true", n)

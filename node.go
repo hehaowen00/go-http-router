@@ -3,6 +3,7 @@ package gohttprouter
 import (
 	"slices"
 	"strings"
+	"unsafe"
 )
 
 type nodePtr int32
@@ -25,6 +26,7 @@ func setFlag(flags *uint8, bit uint8, v bool) {
 
 type node struct {
 	prefix       string
+	prefixWord   uint64
 	handlerIdx   handlerPtr
 	slashChild   nodePtr
 	catchAllNode nodePtr
@@ -43,6 +45,26 @@ type wildcard struct {
 	params []string
 	node   nodePtr
 	minRun uint8
+}
+
+var wordMask [9]uint64
+
+func init() {
+	for i := 1; i < len(wordMask); i++ {
+		wordMask[i] = ^uint64(0) >> (64 - 8*i)
+	}
+}
+
+func setPrefix(n *node, p string) {
+	n.prefix = p
+	if len(p) > 8 {
+		p = p[:8]
+	}
+	var w uint64
+	for i := 0; i < len(p); i++ {
+		w |= uint64(p[i]) << (8 * i)
+	}
+	n.prefixWord = w
 }
 
 func (n *node) addChild(childIdx nodePtr, b byte) {
@@ -460,15 +482,25 @@ descent:
 					continue descent
 				}
 
-				if pLen <= rem && path[idx:idx+pLen] == child.prefix {
-					if nn.flags&(flagHasWildcard|flagHasCatchAll) != 0 {
-						stack.push(searchFrame{n, idx, params.save(), 0})
+				if pLen <= rem {
+					matched := false
+					if rem >= 8 && pLen <= 8 {
+						sd := unsafe.StringData(path)
+						matched = *(*uint64)(unsafe.Add(unsafe.Pointer(sd), idx))&wordMask[pLen] == child.prefixWord
+					} else {
+						matched = path[idx:idx+pLen] == child.prefix
 					}
 
-					n = c.node
-					idx += pLen
-					nn = child
-					continue descent
+					if matched {
+						if nn.flags&(flagHasWildcard|flagHasCatchAll) != 0 {
+							stack.push(searchFrame{n, idx, params.save(), 0})
+						}
+
+						n = c.node
+						idx += pLen
+						nn = child
+						continue descent
+					}
 				}
 
 				if pLen == rem+1 && child.prefix[pLen-1] == '/' &&
@@ -641,7 +673,7 @@ func insert(
 
 	if closestIdx < 0 {
 		childIdx := newNode(nodes)
-		(*nodes)[childIdx].prefix = currentSegment
+		setPrefix(&(*nodes)[childIdx], currentSegment)
 		newParam = insert(
 			nodes,
 			childIdx,
@@ -692,9 +724,9 @@ func insert(
 		closest = &(*nodes)[n.children[closestIdx].node]
 
 		newChild := &(*nodes)[newChildIdx]
-		newChild.prefix = closest.prefix[:best]
+		setPrefix(newChild, closest.prefix[:best])
 		newChild.flags = closest.flags & flagHasParams
-		closest.prefix = closest.prefix[best:]
+		setPrefix(closest, closest.prefix[best:])
 		newChild.appendChild(oldChildIdx, closest.prefix[0])
 
 		n.children[closestIdx].node = newChildIdx

@@ -6,22 +6,20 @@ import (
 	"strings"
 )
 
-type Router[T any] struct {
-	static       [methodCount]map[string]handlerPtr
-	staticMinLen [methodCount]int
-	staticMaxLen [methodCount]int
-	nodes        [methodCount][]node
-	handlers     [methodCount][]T
+type staticLenBounds struct {
+	min int
+	max int
 }
 
-type handler[T any] struct {
-	handlers [methodCount]*T
+type Router[T any] struct {
+	static    [methodCount]map[string]handlerPtr
+	staticLen [methodCount]staticLenBounds
+	nodes     [methodCount][]node
+	handlers  [methodCount][]T
 }
 
 func New[T any]() *Router[T] {
-	return &Router[T]{
-		static: [methodCount]map[string]handlerPtr{},
-	}
+	return &Router[T]{}
 }
 
 func (r *Router[T]) Add(method string, path string, handler T) error {
@@ -32,11 +30,11 @@ func (r *Router[T]) Add(method string, path string, handler T) error {
 
 	if !strings.ContainsAny(path, ":*") {
 		key := normalizeStaticPath(path)
-		if r.staticMinLen[m] == 0 || len(key) < r.staticMinLen[m] {
-			r.staticMinLen[m] = len(key)
+		if r.staticLen[m].min == 0 || len(key) < r.staticLen[m].min {
+			r.staticLen[m].min = len(key)
 		}
-		if len(key) > r.staticMaxLen[m] {
-			r.staticMaxLen[m] = len(key)
+		if len(key) > r.staticLen[m].max {
+			r.staticLen[m].max = len(key)
 		}
 
 		idx := handlerPtr(len(r.handlers[m]))
@@ -84,7 +82,10 @@ func (r *Router[T]) Search(method string, path string, params *Params) *T {
 		path = "/" + path
 	}
 
-	if key := staticKey(path); len(key) >= r.staticMinLen[m] && len(key) <= r.staticMaxLen[m] {
+	if key := staticKey(
+		path,
+	); len(key) >= r.staticLen[m].min &&
+		len(key) <= r.staticLen[m].max {
 		if static := r.static[m]; static != nil {
 			if idx, ok := static[key]; ok {
 				return r.handlerAt(m, idx)
@@ -113,17 +114,19 @@ func (r *Router[T]) refreshStaticLenBounds(m methodEnum) {
 	minLen := 0
 	maxLen := 0
 
-	for key := range r.static[m] {
-		if minLen == 0 || len(key) < minLen {
-			minLen = len(key)
-		}
-		if len(key) > maxLen {
-			maxLen = len(key)
+	if t := r.static[m]; t != nil {
+		for key := range t {
+			if minLen == 0 || len(key) < minLen {
+				minLen = len(key)
+			}
+			if len(key) > maxLen {
+				maxLen = len(key)
+			}
 		}
 	}
 
-	r.staticMinLen[m] = minLen
-	r.staticMaxLen[m] = maxLen
+	r.staticLen[m].min = minLen
+	r.staticLen[m].max = maxLen
 }
 
 func (r *Router[T]) Remove(method string, path string) {
@@ -133,14 +136,18 @@ func (r *Router[T]) Remove(method string, path string) {
 	}
 
 	if !strings.ContainsAny(path, ":*") {
-		if r.static[m] != nil {
+		if t := r.static[m]; t != nil {
 			key := normalizeStaticPath(path)
-			if idx, ok := r.static[m][key]; ok {
-				delete(r.static[m], key)
+			if idx, ok := t[key]; ok {
+				delete(t, key)
 				r.removeHandler(m, idx)
 
-				if len(key) == r.staticMinLen[m] || len(key) == r.staticMaxLen[m] {
+				if len(key) == r.staticLen[m].min || len(key) == r.staticLen[m].max {
 					r.refreshStaticLenBounds(m)
+				}
+
+				if len(t) == 0 {
+					r.static[m] = nil
 				}
 			}
 		}
@@ -181,9 +188,11 @@ func (r *Router[T]) removeHandler(m methodEnum, removed handlerPtr) {
 
 	r.handlers[m] = slices.Delete(handlers, int(removed), int(removed)+1)
 
-	for key, idx := range r.static[m] {
-		if idx > removed {
-			r.static[m][key] = idx - 1
+	if t := r.static[m]; t != nil {
+		for key, idx := range t {
+			if idx > removed {
+				t[key] = idx - 1
+			}
 		}
 	}
 

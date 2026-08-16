@@ -398,7 +398,7 @@ func (n *node) canBacktrack(path string, idx, l, wi int) bool {
 	}
 
 	next := idx
-	for c := 0; c < need; c++ {
+	for range need {
 		if next >= l {
 			return false
 		}
@@ -483,15 +483,19 @@ descent:
 				}
 
 				if pLen <= rem {
-					matched := false
 					if rem >= 8 && pLen <= 8 {
 						sd := unsafe.StringData(path)
-						matched = *(*uint64)(unsafe.Add(unsafe.Pointer(sd), idx))&wordMask[pLen] == child.prefixWord
-					} else {
-						matched = path[idx:idx+pLen] == child.prefix
-					}
+						if *(*uint64)(unsafe.Add(unsafe.Pointer(sd), idx))&wordMask[pLen] == child.prefixWord {
+							if nn.flags&(flagHasWildcard|flagHasCatchAll) != 0 {
+								stack.push(searchFrame{n, idx, params.save(), 0})
+							}
 
-					if matched {
+							n = c.node
+							idx += pLen
+							nn = child
+							continue descent
+						}
+					} else if path[idx:idx+pLen] == child.prefix {
 						if nn.flags&(flagHasWildcard|flagHasCatchAll) != 0 {
 							stack.push(searchFrame{n, idx, params.save(), 0})
 						}

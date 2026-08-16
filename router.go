@@ -6,23 +6,9 @@ import (
 	"strings"
 )
 
-type staticLenSet struct {
-	bits [4]uint64
-}
-
-func (s *staticLenSet) set(n int) {
-	if n < 256 {
-		s.bits[n>>6] |= uint64(1) << (n & 63)
-	}
-}
-
-func (s *staticLenSet) has(n int) bool {
-	return n >= 256 || s.bits[n>>6]&(uint64(1)<<(n&63)) != 0
-}
-
 type Router[T any] struct {
 	static    [methodCount]map[string]handlerPtr
-	staticLen [methodCount]staticLenSet
+	staticLen [methodCount]staticLenFilter
 	nodes     [methodCount][]node
 	handlers  [methodCount][]T
 }
@@ -113,7 +99,7 @@ func (r *Router[T]) handlerAt(m methodEnum, idx handlerPtr) *T {
 }
 
 func (r *Router[T]) refreshStaticLenSet(m methodEnum) {
-	r.staticLen[m] = staticLenSet{}
+	r.staticLen[m] = staticLenFilter{}
 
 	if t := r.static[m]; t != nil {
 		for key := range t {

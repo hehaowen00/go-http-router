@@ -86,9 +86,8 @@ func (r *Router[T]) Search(method string, path string, params *Params) *T {
 		path = "/" + path
 	}
 
-	if key := staticKey(
-		path,
-	); r.staticLen[m].has(len(key)) {
+	key := staticKey(path)
+	if r.staticLen[m].has(len(key)) {
 		if static := r.static[m]; static != nil {
 			if idx, ok := static[key]; ok {
 				return r.handlerAt(m, idx)

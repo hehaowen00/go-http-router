@@ -5,20 +5,6 @@ import (
 	"strings"
 )
 
-type Handler interface {
-	Handle(c Context)
-}
-
-type HandlerFunc func(c Context)
-
-func (h HandlerFunc) Handle(c Context) {
-	h(c)
-}
-
-func NewHandlerFunc(handler func(c Context)) Handler {
-	return HandlerFunc(handler)
-}
-
 func isParam(segment string) bool {
 	return len(segment) > 0 && segment[0] == ':'
 }
@@ -32,11 +18,7 @@ func isCatchAll(segment string) bool {
 }
 
 func catchAllName(segment string) string {
-	if len(segment) > 0 && segment[0] == '*' {
-		return segment[1:]
-	}
-
-	return segment
+	return strings.TrimPrefix(segment, "*")
 }
 
 func longestMatch(left, right string) int {
@@ -72,8 +54,8 @@ func validateSeq(xs []string) error {
 			return fmt.Errorf("param name cannot be empty - %s", k)
 		}
 
-		for i := range idx {
-			if set[i] == k {
+		for j := range idx {
+			if set[j] == k {
 				return fmt.Errorf("duplicate param name - %s", k)
 			}
 		}

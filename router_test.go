@@ -65,8 +65,8 @@ func TestRootRoute(t *testing.T) {
 	params := Params{}
 
 	for _, path := range []string{"/", "", "//"} {
-		if h := r.Search(http.MethodGet, path, &params); h == nil && *h == 1 {
-			t.Fatalf("Search(%q) = nil, want root handler", path)
+		if h := r.Search(http.MethodGet, path, &params); h == nil || *h != 1 {
+			t.Fatalf("Search(%q) = %v, want root handler", path, h)
 		}
 	}
 }
@@ -89,16 +89,17 @@ func TestRouter(t *testing.T) {
 	r := New[int]()
 
 	for i, route := range routes {
-		r.Add(http.MethodGet, route, i)
+		if err := r.Add(http.MethodGet, route, i); err != nil {
+			t.Fatalf("add %s: %v", route, err)
+		}
 	}
 
 	params := Params{}
 
 	for i, route := range routes {
 		h := r.Search(http.MethodGet, route, &params)
-		if h != nil && *h != i {
-			t.Log(route)
-			t.FailNow()
+		if h == nil || *h != i {
+			t.Fatalf("Search(%s) = %v, want %d", route, h, i)
 		}
 	}
 }

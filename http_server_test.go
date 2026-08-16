@@ -32,28 +32,23 @@ func serve(r *Router[http.HandlerFunc]) http.Handler {
 func TestHTTPServerParams(t *testing.T) {
 	r := New[http.HandlerFunc]()
 
-	r.Add(http.MethodGet, "/about", func(w http.ResponseWriter, req *http.Request) {
-		io.WriteString(w, "static=ok")
-	})
-	r.Add(
-		http.MethodGet,
-		"/users/:id",
+	r.Add(http.MethodGet, "/about",
+		func(w http.ResponseWriter, req *http.Request) {
+			io.WriteString(w, "static=ok")
+		})
+	r.Add(http.MethodGet, "/users/:id",
 		func(w http.ResponseWriter, req *http.Request) {
 			p := paramsFrom(req)
 			io.WriteString(w, "id="+p.Get("id")+"&q="+req.URL.Query().Get("q"))
 		},
 	)
-	r.Add(
-		http.MethodGet,
-		"/users/:id/posts/:postID",
+	r.Add(http.MethodGet, "/users/:id/posts/:postID",
 		func(w http.ResponseWriter, req *http.Request) {
 			p := paramsFrom(req)
 			io.WriteString(w, "id="+p.Get("id")+"&post="+p.Get("postID"))
 		},
 	)
-	r.Add(
-		http.MethodGet,
-		"/files/*path",
+	r.Add(http.MethodGet, "/files/*path",
 		func(w http.ResponseWriter, req *http.Request) {
 			p := paramsFrom(req)
 			io.WriteString(w, "path="+p.Get("path"))

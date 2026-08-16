@@ -134,6 +134,11 @@ func TestRouterGithub(t *testing.T) {
 }
 
 func TestRouterLarge(t *testing.T) {
+	if len(largeAPI) == 0 {
+		t.Skip()
+		return
+	}
+
 	r := New[int]()
 	params := Params{}
 
@@ -205,6 +210,13 @@ func BenchmarkRouterGithub(b *testing.B) {
 }
 
 func BenchmarkRouterLarge(b *testing.B) {
+	if len(largeAPI) == 0 {
+		b.Skip()
+		return
+	}
+
+	b.ResetTimer()
+
 	r := New[int]()
 	for i, route := range largeAPI {
 		r.Add(route[0], route[1], i)
@@ -278,6 +290,13 @@ func BenchmarkRouterGithubAll(b *testing.B) {
 }
 
 func BenchmarkRouterLargeAll(b *testing.B) {
+	if len(largeAPI) == 0 {
+		b.Skip()
+		return
+	}
+
+	b.ResetTimer()
+
 	r := New[int]()
 	for i, route := range largeAPI {
 		r.Add(route[0], route[1], i)

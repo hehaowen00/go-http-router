@@ -90,9 +90,14 @@ func validateSeq(xs []string) error {
 }
 
 func staticKey(s string) string {
-	if len(s) > 1 && s[len(s)-1] == '/' {
-		return s[:len(s)-1]
+	n := len(s)
+	if n <= 1 {
+		return s
 	}
 
-	return s
+	if s[n-1] != '/' {
+		return s
+	}
+
+	return s[:n-1]
 }

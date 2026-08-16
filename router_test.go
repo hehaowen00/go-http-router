@@ -9,6 +9,17 @@ import (
 	"github.com/hehaowen00/go-inspect"
 )
 
+func TestURL(t *testing.T) {
+	req, _ := http.NewRequest(http.MethodGet, "https://google.com", nil)
+	q := req.URL.Query()
+	q.Add("a", "b")
+	q.Add("b", "a")
+	req.URL.RawQuery = q.Encode()
+
+	t.Log(req.URL)
+	t.Log(req.URL.Host)
+}
+
 func TestPathSplit(t *testing.T) {
 	paths := []string{
 		"/public//",
@@ -173,7 +184,10 @@ func BenchmarkRouterGithubParallel(b *testing.B) {
 
 	reqs := make([]struct{ method, path string }, len(githubAPI))
 	for i, route := range githubAPI {
-		reqs[i] = struct{ method, path string }{method: route[0], path: concretePath(route[1])}
+		reqs[i] = struct{ method, path string }{
+			method: route[0],
+			path:   concretePath(route[1]),
+		}
 	}
 
 	for _, req := range reqs {

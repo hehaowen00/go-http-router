@@ -2,6 +2,8 @@ package gohttprouter
 
 import "net/http"
 
+const queryMethod = "QUERY"
+
 type methodEnum int
 
 const (
@@ -22,7 +24,7 @@ func methodToEnum(method string) methodEnum {
 	switch method {
 	case http.MethodGet:
 		return methodGet
-	case "QUERY":
+	case queryMethod:
 		return methodQuery
 	case http.MethodPost:
 		return methodPost

@@ -24,8 +24,7 @@ func (r *Router[T]) MemSize() uintptr {
 			for j := range n.wildcard {
 				w := &n.wildcard[j]
 
-				var s string
-				size += uintptr(cap(w.params)) * unsafe.Sizeof(s)
+				size += uintptr(cap(w.params)) * unsafe.Sizeof("")
 
 				for _, p := range w.params {
 					size += uintptr(len(p))

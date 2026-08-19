@@ -18,7 +18,7 @@ func (r *Router[T]) MemSize() uintptr {
 
 			size += uintptr(len(n.prefix))
 			size += uintptr(len(n.catchAllName))
-			size += uintptr(cap(n.children)) * unsafe.Sizeof(child{})
+			size += uintptr(cap(n.children)) * unsafe.Sizeof(childRef{})
 			size += uintptr(cap(n.wildcard)) * unsafe.Sizeof(wildcard{})
 
 			for j := range n.wildcard {

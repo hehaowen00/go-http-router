@@ -13,6 +13,7 @@ const (
 	flagHasParams uint8 = 1 << iota
 	flagHasCatchAll
 	flagHasWildcard
+	flagPrefixEndsSlash
 )
 
 func setFlag(flags *uint8, bit uint8, v bool) {
@@ -30,14 +31,14 @@ type node struct {
 	slashChild   nodePtr
 	catchAllNode nodePtr
 	flags        uint8
-	children     []child
+	children     []childRef
 	wildcard     []wildcard
 	catchAllName string
 }
 
-type child struct {
-	b    byte
-	node nodePtr
+type childRef struct {
+	b byte
+	n nodePtr
 }
 
 type wildcard struct {
@@ -56,6 +57,7 @@ func init() {
 
 func setPrefix(n *node, p string) {
 	n.prefix = p
+	setFlag(&n.flags, flagPrefixEndsSlash, len(p) > 0 && p[len(p)-1] == '/')
 	if len(p) > 8 {
 		p = p[:8]
 	}
@@ -68,17 +70,17 @@ func setPrefix(n *node, p string) {
 
 func (n *node) addChild(childIdx nodePtr, b byte) {
 	if cap(n.children) == 0 {
-		n.children = make([]child, 0, 4)
+		n.children = make([]childRef, 0, 4)
 	}
 
-	i, _ := slices.BinarySearchFunc(n.children, b, func(c child, t byte) int {
+	i, _ := slices.BinarySearchFunc(n.children, b, func(c childRef, t byte) int {
 		return int(c.b) - int(t)
 	})
-	n.children = slices.Insert(n.children, i, child{b: b, node: childIdx})
+	n.children = slices.Insert(n.children, i, childRef{b, childIdx})
 }
 
 func (n *node) appendChild(childIdx nodePtr, b byte) {
-	n.children = append(n.children, child{b: b, node: childIdx})
+	n.children = append(n.children, childRef{b, childIdx})
 }
 
 func (n *node) isEmpty() bool {
@@ -103,7 +105,7 @@ func (n *node) recomputeHasParams(nodes []node) bool {
 	}
 
 	for _, c := range n.children {
-		if nodes[c.node].flags&flagHasParams != 0 {
+		if nodes[c.n].flags&flagHasParams != 0 {
 			return true
 		}
 	}
@@ -157,7 +159,7 @@ func compactNodes(nodes []node) []node {
 		}
 
 		for j := range n.children {
-			n.children[j].node = mapping[n.children[j].node]
+			n.children[j].n = mapping[n.children[j].n]
 		}
 
 		for j := range n.wildcard {
@@ -459,15 +461,13 @@ descent:
 
 			for i := range nn.children {
 				c := nn.children[i]
-				if b < c.b {
-					break
-				}
 
 				if b != c.b {
 					continue
 				}
 
-				child := &nodes[c.node]
+				cnode := c.n
+				child := &nodes[cnode]
 				pLen := len(child.prefix)
 
 				if pLen == 1 {
@@ -475,7 +475,7 @@ descent:
 						stack.push(searchFrame{n, idx, params.save(), 0})
 					}
 
-					n = c.node
+					n = cnode
 					idx++
 					nn = child
 					continue descent
@@ -489,7 +489,7 @@ descent:
 								stack.push(searchFrame{n, idx, params.save(), 0})
 							}
 
-							n = c.node
+							n = cnode
 							idx += pLen
 							nn = child
 							continue descent
@@ -499,14 +499,14 @@ descent:
 							stack.push(searchFrame{n, idx, params.save(), 0})
 						}
 
-						n = c.node
+						n = cnode
 						idx += pLen
 						nn = child
 						continue descent
 					}
 				}
 
-				if pLen == rem+1 && child.prefix[pLen-1] == '/' &&
+				if pLen == rem+1 && child.flags&flagPrefixEndsSlash != 0 &&
 					path[idx:] == child.prefix[:rem] {
 					if child.handlerIdx >= 0 {
 						return child.handlerIdx
@@ -515,10 +515,10 @@ descent:
 
 				break
 			}
-		}
 
-		wi = 0
-		goto wildcards
+			wi = 0
+			goto wildcards
+		}
 
 	backtrack:
 		if stack.empty() {
@@ -661,17 +661,15 @@ func insert(
 	b := currentSegment[0]
 
 	for i := range n.children {
-		c := &n.children[i]
-
-		if b < c.b {
+		if b < n.children[i].b {
 			break
 		}
 
-		if b != c.b {
+		if b != n.children[i].b {
 			continue
 		}
 
-		score := longestMatch(currentSegment, (*nodes)[c.node].prefix)
+		score := longestMatch(currentSegment, (*nodes)[n.children[i].n].prefix)
 		if score > best {
 			best = score
 			closestIdx = i
@@ -702,7 +700,7 @@ func insert(
 		return newParam
 	}
 
-	closest := &(*nodes)[n.children[closestIdx].node]
+	closest := &(*nodes)[n.children[closestIdx].n]
 	if len(closest.prefix) == best {
 		if best == len(pathSeq[0]) {
 			pathSeq = pathSeq[1:]
@@ -712,7 +710,7 @@ func insert(
 
 		newParam = insert(
 			nodes,
-			n.children[closestIdx].node,
+			n.children[closestIdx].n,
 			pathSeq,
 			handlerIdx,
 		)
@@ -725,10 +723,10 @@ func insert(
 	}
 
 	if len(closest.prefix) > best {
-		oldChildIdx := n.children[closestIdx].node
+		oldChildIdx := n.children[closestIdx].n
 		newChildIdx := newNode(nodes)
 		n = &(*nodes)[nodeIdx]
-		closest = &(*nodes)[n.children[closestIdx].node]
+		closest = &(*nodes)[n.children[closestIdx].n]
 
 		newChild := &(*nodes)[newChildIdx]
 		setPrefix(newChild, closest.prefix[:best])
@@ -736,7 +734,7 @@ func insert(
 		setPrefix(closest, closest.prefix[best:])
 		newChild.appendChild(oldChildIdx, closest.prefix[0])
 
-		n.children[closestIdx].node = newChildIdx
+		n.children[closestIdx].n = newChildIdx
 
 		if newChild.prefix == "/" {
 			n.slashChild = newChildIdx
@@ -811,17 +809,15 @@ func remove(nodes []node, nodeIdx nodePtr, pathSeq []string) bool {
 	b := currentSegment[0]
 
 	for i := range n.children {
-		c := &n.children[i]
-
-		if b < c.b {
+		if b < n.children[i].b {
 			break
 		}
 
-		if b != c.b {
+		if b != n.children[i].b {
 			continue
 		}
 
-		score := longestMatch(currentSegment, nodes[c.node].prefix)
+		score := longestMatch(currentSegment, nodes[n.children[i].n].prefix)
 		if score > best {
 			best = score
 			closestIdx = i
@@ -832,7 +828,7 @@ func remove(nodes []node, nodeIdx nodePtr, pathSeq []string) bool {
 		return false
 	}
 
-	childIdx := n.children[closestIdx].node
+	childIdx := n.children[closestIdx].n
 
 	if len(nodes[childIdx].prefix) > best {
 		return false

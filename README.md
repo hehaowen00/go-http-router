@@ -12,16 +12,16 @@ goos: darwin
 goarch: arm64
 pkg: github.com/hehaowen00/go-http-router
 cpu: Apple M2 Max
-BenchmarkBuildGithubAPI-12              	  19292	    60906 ns/op	 138161 B/op	   1061 allocs/op
-BenchmarkBuildGithubAPIInsertOnly-12    	  20091	    59668 ns/op	 138161 B/op	   1061 allocs/op
-BenchmarkRouterGithub-12                	37040942	       31.97 ns/op
-BenchmarkRouterLarge-12                 	44972312	       24.60 ns/op
-BenchmarkRouterGithubParallel-12        	1382958	      869.1 ns/op	      0 B/op	      0 allocs/op
-BenchmarkRouterGithubAll-12             	 154622	     7641 ns/op
-BenchmarkRouterLargeAll-12              	  57463	    20172 ns/op
-BenchmarkRouterGithubRandom-12          	 157362	     7690 ns/op
-BenchmarkRouterGithubParams-12          	31949661	       37.09 ns/op	      0 B/op	      0 allocs/op
-BenchmarkParamMissSingle-12             	75809426	       15.99 ns/op	      0 B/op	      0 allocs/op
+BenchmarkBuildGithubAPI-12              	  19532	    60600 ns/op	 138162 B/op	   1061 allocs/op
+BenchmarkBuildGithubAPIInsertOnly-12    	  19978	    60100 ns/op	 138161 B/op	   1061 allocs/op
+BenchmarkRouterGithub-12                	37497753	       31.61 ns/op
+BenchmarkRouterLarge-12                 	44853246	       24.97 ns/op
+BenchmarkRouterGithubParallel-12        	1425466	      842.7 ns/op	      0 B/op	      0 allocs/op
+BenchmarkRouterGithubAll-12             	 155446	     7562 ns/op
+BenchmarkRouterLargeAll-12              	  56522	    20444 ns/op
+BenchmarkRouterGithubRandom-12          	 159190	     7540 ns/op
+BenchmarkRouterGithubParams-12          	32651173	       36.36 ns/op	      0 B/op	      0 allocs/op
+BenchmarkParamMissSingle-12             	73130598	       16.16 ns/op	      0 B/op	      0 allocs/op
 PASS
-ok  	github.com/hehaowen00/go-http-router	12.947s
+ok  	github.com/hehaowen00/go-http-router	13.112s
 ```

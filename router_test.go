@@ -199,6 +199,7 @@ func BenchmarkRouterGithub(b *testing.B) {
 	}
 
 	params := Params{}
+	b.ResetTimer()
 
 	for i := 0; b.Loop(); i++ {
 		route := githubAPI[i%len(githubAPI)]
@@ -215,13 +216,12 @@ func BenchmarkRouterLarge(b *testing.B) {
 		return
 	}
 
-	b.ResetTimer()
-
 	r := New[int]()
 	for i, route := range largeAPI {
 		r.Add(route[0], route[1], i)
 	}
 	params := Params{}
+	b.ResetTimer()
 
 	for i := 0; b.Loop(); i++ {
 		route := largeAPI[i%len(largeAPI)]
@@ -278,6 +278,7 @@ func BenchmarkRouterGithubAll(b *testing.B) {
 	}
 
 	params := Params{}
+	b.ResetTimer()
 
 	for i := 0; b.Loop(); i++ {
 		for _, route := range githubAPI {
@@ -295,13 +296,13 @@ func BenchmarkRouterLargeAll(b *testing.B) {
 		return
 	}
 
-	b.ResetTimer()
-
 	r := New[int]()
 	for i, route := range largeAPI {
 		r.Add(route[0], route[1], i)
 	}
+
 	params := Params{}
+	b.ResetTimer()
 
 	for i := 0; b.Loop(); i++ {
 		for _, route := range largeAPI {
@@ -320,9 +321,8 @@ func BenchmarkRouterGithubRandom(b *testing.B) {
 	}
 
 	xs := rand.Perm(len(githubAPI))
-	b.ResetTimer()
-
 	params := Params{}
+	b.ResetTimer()
 
 	for i := 0; b.Loop(); i++ {
 		for _, j := range xs {

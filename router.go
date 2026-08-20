@@ -44,6 +44,13 @@ func (r *Router[T]) Add(method string, path string, handler T) error {
 		return fmt.Errorf("invalid path - %w", err)
 	}
 
+	if len(r.nodes[m])+2*len(sequence)+2 > maxTreeNodes {
+		return fmt.Errorf(
+			"too many param routes - tree limit %d nodes",
+			maxTreeNodes,
+		)
+	}
+
 	if r.nodes[m] == nil {
 		r.nodes[m] = make([]node, 1, 64)
 		r.nodes[m][0].handlerIdx = -1

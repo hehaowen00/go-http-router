@@ -5,8 +5,6 @@ import (
 	"net/http"
 	"slices"
 	"testing"
-
-	"github.com/hehaowen00/go-inspect"
 )
 
 func TestURL(t *testing.T) {
@@ -117,7 +115,6 @@ func TestRouterGithub(t *testing.T) {
 	for _, route := range githubAPI {
 		h := r.Search(route[0], route[1], &params)
 		if h == nil {
-			inspect.Inspect(r)
 			t.Log("failed to find", route[0], route[1])
 			t.FailNow()
 		}
@@ -151,7 +148,6 @@ func TestRouterLarge(t *testing.T) {
 	for _, route := range largeAPI {
 		h := r.Search(route[0], route[1], &params)
 		if h == nil {
-			inspect.Inspect(r)
 			t.Log("failed to find", route[0], route[1])
 			t.FailNow()
 		}

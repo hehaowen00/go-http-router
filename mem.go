@@ -17,12 +17,18 @@ func (r *Router[T]) MemSize() uintptr {
 			n := &nodes[i]
 
 			size += uintptr(len(n.prefix))
-			size += uintptr(len(n.catchAllName))
 			size += uintptr(cap(n.children)) * unsafe.Sizeof(childRef{})
-			size += uintptr(cap(n.wildcard)) * unsafe.Sizeof(wildcard{})
 
-			for j := range n.wildcard {
-				w := &n.wildcard[j]
+			if n.cold == nil {
+				continue
+			}
+
+			size += unsafe.Sizeof(nodeCold{})
+			size += uintptr(len(n.cold.catchAllName))
+			size += uintptr(cap(n.cold.wildcard)) * unsafe.Sizeof(wildcard{})
+
+			for j := range n.cold.wildcard {
+				w := &n.cold.wildcard[j]
 
 				size += uintptr(cap(w.params)) * unsafe.Sizeof("")
 

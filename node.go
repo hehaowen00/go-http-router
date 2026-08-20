@@ -5,6 +5,11 @@ import (
 	"unsafe"
 )
 
+const (
+	maxTreeNodes = 1<<15 - 1
+	inlineFrames = 4
+)
+
 type nodePtr int32
 
 type handlerPtr int32
@@ -25,20 +30,38 @@ func setFlag(flags *uint8, bit uint8, v bool) {
 }
 
 type node struct {
-	prefix       string
-	prefixWord   uint64
-	handlerIdx   handlerPtr
-	slashChild   nodePtr
-	catchAllNode nodePtr
-	flags        uint8
-	children     []childRef
+	prefix     string
+	prefixWord uint64
+	children   []childRef
+	cold       *nodeCold
+	handlerIdx handlerPtr
+	slashChild int16
+	flags      uint8
+}
+
+type nodeCold struct {
 	wildcard     []wildcard
 	catchAllName string
+	catchAllNode nodePtr
+}
+
+func (n *node) ensureCold() *nodeCold {
+	if n.cold == nil {
+		n.cold = &nodeCold{catchAllNode: -1}
+	}
+	return n.cold
+}
+
+func (n *node) wildcards() []wildcard {
+	if n.cold == nil {
+		return nil
+	}
+	return n.cold.wildcard
 }
 
 type childRef struct {
+	n int16
 	b byte
-	n nodePtr
 }
 
 type wildcard struct {
@@ -57,14 +80,19 @@ func init() {
 
 func setPrefix(n *node, p string) {
 	n.prefix = p
+
 	setFlag(&n.flags, flagPrefixEndsSlash, len(p) > 0 && p[len(p)-1] == '/')
+
 	if len(p) > 8 {
 		p = p[:8]
 	}
+
 	var w uint64
+
 	for i := 0; i < len(p); i++ {
 		w |= uint64(p[i]) << (8 * i)
 	}
+
 	n.prefixWord = w
 }
 
@@ -76,11 +104,18 @@ func (n *node) addChild(childIdx nodePtr, b byte) {
 	i, _ := slices.BinarySearchFunc(n.children, b, func(c childRef, t byte) int {
 		return int(c.b) - int(t)
 	})
-	n.children = slices.Insert(n.children, i, childRef{b, childIdx})
+
+	n.children = slices.Insert(n.children, i, childRef{
+		n: int16(childIdx),
+		b: b,
+	})
 }
 
 func (n *node) appendChild(childIdx nodePtr, b byte) {
-	n.children = append(n.children, childRef{b, childIdx})
+	n.children = append(n.children, childRef{
+		n: int16(childIdx),
+		b: b,
+	})
 }
 
 func (n *node) isEmpty() bool {
@@ -88,24 +123,27 @@ func (n *node) isEmpty() bool {
 		n.flags&(flagHasWildcard|flagHasCatchAll) == 0
 }
 
-func (n *node) recomputeWildcardMinRuns() {
+func (c *nodeCold) recomputeWildcardMinRuns() {
 	m := uint8(0)
-	for i := len(n.wildcard) - 1; i >= 0; i-- {
-		p := uint8(len(n.wildcard[i].params))
+
+	for i := len(c.wildcard) - 1; i >= 0; i-- {
+		p := uint8(len(c.wildcard[i].params))
+
 		if m == 0 || p < m {
 			m = p
 		}
-		n.wildcard[i].minRun = m
+
+		c.wildcard[i].minRun = m
 	}
 }
 
 func (n *node) recomputeHasParams(nodes []node) bool {
-	if len(n.wildcard) > 0 || n.flags&flagHasCatchAll != 0 {
+	if len(n.wildcards()) > 0 || n.flags&flagHasCatchAll != 0 {
 		return true
 	}
 
 	for _, c := range n.children {
-		if nodes[c.n].flags&flagHasParams != 0 {
+		if nodes[nodePtr(c.n)].flags&flagHasParams != 0 {
 			return true
 		}
 	}
@@ -151,19 +189,19 @@ func compactNodes(nodes []node) []node {
 		n := &compacted[i]
 
 		if n.slashChild >= 0 {
-			n.slashChild = mapping[n.slashChild]
+			n.slashChild = int16(mapping[nodePtr(n.slashChild)])
 		}
 
-		if n.catchAllNode >= 0 {
-			n.catchAllNode = mapping[n.catchAllNode]
+		if n.cold != nil && n.cold.catchAllNode >= 0 {
+			n.cold.catchAllNode = mapping[n.cold.catchAllNode]
 		}
 
 		for j := range n.children {
-			n.children[j].n = mapping[n.children[j].n]
+			n.children[j].n = int16(mapping[nodePtr(n.children[j].n)])
 		}
 
-		for j := range n.wildcard {
-			n.wildcard[j].node = mapping[n.wildcard[j].node]
+		for j := range n.wildcards() {
+			n.cold.wildcard[j].node = mapping[n.cold.wildcard[j].node]
 		}
 	}
 
@@ -195,8 +233,8 @@ func insertParamRun(
 ) bool {
 	n := &(*nodes)[nodeIdx]
 
-	for i := range n.wildcard {
-		if n.wildcard[i].params[0] != names[0] {
+	for i := range n.wildcards() {
+		if n.cold.wildcard[i].params[0] != names[0] {
 			continue
 		}
 
@@ -213,11 +251,12 @@ func insertParamRun(
 	childIdx := newNode(nodes)
 	n = &(*nodes)[nodeIdx]
 
-	n.wildcard = append(n.wildcard, wildcard{
+	c := n.ensureCold()
+	c.wildcard = append(c.wildcard, wildcard{
 		params: names,
 		node:   childIdx,
 	})
-	n.recomputeWildcardMinRuns()
+	c.recomputeWildcardMinRuns()
 	n.flags |= flagHasWildcard | flagHasParams
 
 	insert(nodes, childIdx, rest, handlerIdx)
@@ -233,13 +272,13 @@ func insertWildcardRun(
 	rest []string,
 	handlerIdx handlerPtr,
 ) bool {
-	wc := &(*nodes)[parentIdx].wildcard[wcIdx]
+	wc := &(*nodes)[parentIdx].cold.wildcard[wcIdx]
 
 	cp := commonPrefixLen(wc.params, names)
 
 	if cp < len(wc.params) {
 		splitWildcard(nodes, parentIdx, wcIdx, cp)
-		wc = &(*nodes)[parentIdx].wildcard[wcIdx]
+		wc = &(*nodes)[parentIdx].cold.wildcard[wcIdx]
 	}
 
 	names = names[cp:]
@@ -252,7 +291,7 @@ func insertWildcardRun(
 }
 
 func splitWildcard(nodes *[]node, parentIdx nodePtr, wcIdx int, cp int) {
-	wc := &(*nodes)[parentIdx].wildcard[wcIdx]
+	wc := &(*nodes)[parentIdx].cold.wildcard[wcIdx]
 
 	oldNode := wc.node
 	remainder := wc.params[cp:]
@@ -262,11 +301,12 @@ func splitWildcard(nodes *[]node, parentIdx nodePtr, wcIdx int, cp int) {
 	moved := &(*nodes)[newIdx]
 
 	moved.flags |= flagHasParams | flagHasWildcard
-	moved.wildcard = []wildcard{{params: remainder, node: oldNode}}
-	moved.recomputeWildcardMinRuns()
+	mc := moved.ensureCold()
+	mc.wildcard = []wildcard{{params: remainder, node: oldNode}}
+	mc.recomputeWildcardMinRuns()
 
 	wc.node = newIdx
-	(*nodes)[parentIdx].recomputeWildcardMinRuns()
+	(*nodes)[parentIdx].cold.recomputeWildcardMinRuns()
 }
 
 func removeParamRun(
@@ -277,8 +317,8 @@ func removeParamRun(
 ) bool {
 	n := &nodes[nodeIdx]
 
-	for i := range n.wildcard {
-		if n.wildcard[i].params[0] != names[0] {
+	for i := range n.wildcards() {
+		if n.cold.wildcard[i].params[0] != names[0] {
 			continue
 		}
 
@@ -288,11 +328,12 @@ func removeParamRun(
 		}
 
 		n = &nodes[nodeIdx]
-		if nodes[n.wildcard[i].node].isEmpty() {
-			n.wildcard = slices.Delete(n.wildcard, i, i+1)
-			n.recomputeWildcardMinRuns()
-			setFlag(&n.flags, flagHasWildcard, len(n.wildcard) > 0)
+		if nodes[n.cold.wildcard[i].node].isEmpty() {
+			n.cold.wildcard = slices.Delete(n.cold.wildcard, i, i+1)
+			n.cold.recomputeWildcardMinRuns()
+			setFlag(&n.flags, flagHasWildcard, len(n.wildcards()) > 0)
 		}
+
 		setFlag(&n.flags, flagHasParams, n.recomputeHasParams(nodes))
 
 		return true
@@ -308,7 +349,7 @@ func removeWildcardRun(
 	names []string,
 	rest []string,
 ) bool {
-	wc := &nodes[parentIdx].wildcard[wcIdx]
+	wc := &nodes[parentIdx].cold.wildcard[wcIdx]
 
 	cp := commonPrefixLen(wc.params, names)
 
@@ -323,8 +364,8 @@ func removeWildcardRun(
 	}
 
 	cont := &nodes[wc.node]
-	for i := range cont.wildcard {
-		if cont.wildcard[i].params[0] != names[0] {
+	for i := range cont.wildcards() {
+		if cont.cold.wildcard[i].params[0] != names[0] {
 			continue
 		}
 
@@ -334,10 +375,10 @@ func removeWildcardRun(
 		}
 
 		cont = &nodes[wc.node]
-		if nodes[cont.wildcard[i].node].isEmpty() {
-			cont.wildcard = slices.Delete(cont.wildcard, i, i+1)
-			cont.recomputeWildcardMinRuns()
-			setFlag(&cont.flags, flagHasWildcard, len(cont.wildcard) > 0)
+		if nodes[cont.cold.wildcard[i].node].isEmpty() {
+			cont.cold.wildcard = slices.Delete(cont.cold.wildcard, i, i+1)
+			cont.cold.recomputeWildcardMinRuns()
+			setFlag(&cont.flags, flagHasWildcard, len(cont.wildcards()) > 0)
 		}
 		setFlag(&cont.flags, flagHasParams, cont.recomputeHasParams(nodes))
 
@@ -353,8 +394,6 @@ type searchFrame struct {
 	paramsIdx paramsIndex
 	wi        int
 }
-
-const inlineFrames = 4
 
 type frameStack struct {
 	frames [inlineFrames]searchFrame
@@ -390,10 +429,10 @@ func (n *node) canBacktrack(path string, idx, l, wi int) bool {
 		return true
 	}
 
-	if wi >= len(n.wildcard) {
+	if wi >= len(n.wildcards()) {
 		return false
 	}
-	need := int(n.wildcard[wi].minRun)
+	need := int(n.cold.wildcard[wi].minRun)
 	if need == 0 {
 		return false
 	}
@@ -451,7 +490,7 @@ descent:
 						stack.push(searchFrame{n, idx, params.save(), 0})
 					}
 
-					n = sc
+					n = nodePtr(sc)
 					idx++
 					nn = &nodes[n]
 					continue descent
@@ -467,7 +506,7 @@ descent:
 					continue
 				}
 
-				cnode := c.n
+				cnode := nodePtr(c.n)
 				child := &nodes[cnode]
 				pLen := len(child.prefix)
 
@@ -536,8 +575,12 @@ descent:
 		}
 
 	wildcards:
-		for ; wi < len(nn.wildcard); wi++ {
-			wc := &nn.wildcard[wi]
+		if nn.flags&(flagHasWildcard|flagHasCatchAll) == 0 {
+			goto backtrack
+		}
+
+		for ; wi < len(nn.cold.wildcard); wi++ {
+			wc := &nn.cold.wildcard[wi]
 			saved := params.save()
 
 			next := idx
@@ -571,7 +614,7 @@ descent:
 				continue
 			}
 
-			if wi == len(nn.wildcard)-1 && nn.flags&flagHasCatchAll == 0 {
+			if wi == len(nn.cold.wildcard)-1 && nn.flags&flagHasCatchAll == 0 {
 				n = wc.node
 				idx = next
 				nn = &nodes[n]
@@ -597,8 +640,9 @@ descent:
 			if start < l && path[start] == '/' {
 				start++
 			}
-			params.set(nn.catchAllName, int32(start), int32(l))
-			n = nn.catchAllNode
+
+			params.set(nn.cold.catchAllName, int32(start), int32(l))
+			n = nn.cold.catchAllNode
 			idx = l
 			nn = &nodes[n]
 			continue descent
@@ -629,15 +673,16 @@ func insert(
 			childIdx := newNode(nodes)
 
 			n = &(*nodes)[nodeIdx]
-			n.catchAllName = name
-			n.catchAllNode = childIdx
+			c := n.ensureCold()
+			c.catchAllName = name
+			c.catchAllNode = childIdx
 			n.flags |= flagHasCatchAll
 		} else {
 			n = &(*nodes)[nodeIdx]
-			n.catchAllName = name
+			n.cold.catchAllName = name
 		}
 
-		insert(nodes, n.catchAllNode, pathSeq[1:], handlerIdx)
+		insert(nodes, (*nodes)[nodeIdx].cold.catchAllNode, pathSeq[1:], handlerIdx)
 
 		n = &(*nodes)[nodeIdx]
 		n.flags |= flagHasParams
@@ -691,7 +736,7 @@ func insert(
 		n.addChild(childIdx, (*nodes)[childIdx].prefix[0])
 
 		if currentSegment == "/" {
-			n.slashChild = childIdx
+			n.slashChild = int16(childIdx)
 		}
 
 		if newParam {
@@ -711,7 +756,7 @@ func insert(
 
 		newParam = insert(
 			nodes,
-			n.children[closestIdx].n,
+			nodePtr(n.children[closestIdx].n),
 			pathSeq,
 			handlerIdx,
 		)
@@ -724,7 +769,7 @@ func insert(
 	}
 
 	if len(closest.prefix) > best {
-		oldChildIdx := n.children[closestIdx].n
+		oldChildIdx := nodePtr(n.children[closestIdx].n)
 		newChildIdx := newNode(nodes)
 		n = &(*nodes)[nodeIdx]
 		closest = &(*nodes)[n.children[closestIdx].n]
@@ -735,12 +780,12 @@ func insert(
 		setPrefix(closest, closest.prefix[best:])
 		newChild.appendChild(oldChildIdx, closest.prefix[0])
 
-		n.children[closestIdx].n = newChildIdx
+		n.children[closestIdx].n = int16(newChildIdx)
 
 		if newChild.prefix == "/" {
-			n.slashChild = newChildIdx
+			n.slashChild = int16(newChildIdx)
 		} else if closest.prefix == "/" {
-			newChild.slashChild = oldChildIdx
+			newChild.slashChild = int16(oldChildIdx)
 		}
 
 		if best >= len(currentSegment) {
@@ -777,15 +822,15 @@ func remove(nodes []node, nodeIdx nodePtr, pathSeq []string) bool {
 	n := &nodes[nodeIdx]
 
 	if isCatchAll(currentSegment) {
-		if n.flags&flagHasCatchAll == 0 ||
-			n.catchAllName != catchAllName(currentSegment) {
+		if n.flags&flagHasCatchAll == 0 || n.cold == nil ||
+			n.cold.catchAllName != catchAllName(currentSegment) {
 			return false
 		}
 
-		removed := remove(nodes, n.catchAllNode, pathSeq[1:])
-		if removed && nodes[n.catchAllNode].isEmpty() {
+		removed := remove(nodes, n.cold.catchAllNode, pathSeq[1:])
+		if removed && nodes[n.cold.catchAllNode].isEmpty() {
 			n.flags &^= flagHasCatchAll
-			n.catchAllName = ""
+			n.cold.catchAllName = ""
 		}
 
 		setFlag(&n.flags, flagHasParams, n.recomputeHasParams(nodes))
@@ -829,7 +874,7 @@ func remove(nodes []node, nodeIdx nodePtr, pathSeq []string) bool {
 		return false
 	}
 
-	childIdx := n.children[closestIdx].n
+	childIdx := nodePtr(n.children[closestIdx].n)
 
 	if len(nodes[childIdx].prefix) > best {
 		return false
@@ -851,7 +896,7 @@ func remove(nodes []node, nodeIdx nodePtr, pathSeq []string) bool {
 	if nodes[childIdx].isEmpty() {
 		n.children = slices.Delete(n.children, closestIdx, closestIdx+1)
 
-		if n.slashChild == childIdx {
+		if nodePtr(n.slashChild) == childIdx {
 			n.slashChild = -1
 		}
 	}

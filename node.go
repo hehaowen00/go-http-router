@@ -443,10 +443,11 @@ descent:
 
 		{
 			b := path[idx]
+			hasWild := nn.flags&(flagHasWildcard|flagHasCatchAll) != 0
 
 			if b == '/' {
 				if sc := nn.slashChild; sc >= 0 {
-					if nn.flags&(flagHasWildcard|flagHasCatchAll) != 0 {
+					if hasWild {
 						stack.push(searchFrame{n, idx, params.save(), 0})
 					}
 
@@ -471,7 +472,7 @@ descent:
 				pLen := len(child.prefix)
 
 				if pLen == 1 {
-					if nn.flags&(flagHasWildcard|flagHasCatchAll) != 0 {
+					if hasWild {
 						stack.push(searchFrame{n, idx, params.save(), 0})
 					}
 
@@ -485,7 +486,7 @@ descent:
 					if rem >= 8 && pLen <= 8 {
 						sd := unsafe.StringData(path)
 						if *(*uint64)(unsafe.Add(unsafe.Pointer(sd), idx))&wordMask[pLen] == child.prefixWord {
-							if nn.flags&(flagHasWildcard|flagHasCatchAll) != 0 {
+							if hasWild {
 								stack.push(searchFrame{n, idx, params.save(), 0})
 							}
 
@@ -495,7 +496,7 @@ descent:
 							continue descent
 						}
 					} else if path[idx:idx+pLen] == child.prefix {
-						if nn.flags&(flagHasWildcard|flagHasCatchAll) != 0 {
+						if hasWild {
 							stack.push(searchFrame{n, idx, params.save(), 0})
 						}
 

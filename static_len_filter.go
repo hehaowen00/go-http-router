@@ -13,12 +13,14 @@ func staticLenHash(n int) uint64 {
 // bloom filter like construct for checking if a path of a certain length is
 // a member of the router static map
 type staticLenFilter struct {
-	bits [staticLenBits / 64]uint64
+	bits  [staticLenBits / 64]uint64
+	count int
 }
 
 func (s *staticLenFilter) set(n int) {
 	h := staticLenHash(n)
 	s.bits[h>>6] |= 1 << (h & 63)
+	s.count++
 }
 
 func (s *staticLenFilter) has(n int) bool {

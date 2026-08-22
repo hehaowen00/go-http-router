@@ -52,11 +52,12 @@ func (n *node) ensureCold() *nodeCold {
 	return n.cold
 }
 
-func (n *node) wildcards() []wildcard {
+func (n *node) numWildcards() int {
 	if n.cold == nil {
-		return nil
+		return 0
 	}
-	return n.cold.wildcard
+
+	return len(n.cold.wildcard)
 }
 
 type childRef struct {
@@ -70,13 +71,17 @@ type wildcard struct {
 	minRun uint8
 }
 
-var wordMask [9]uint64
+const maskLen = 9
 
-func init() {
-	for i := 1; i < len(wordMask); i++ {
-		wordMask[i] = ^uint64(0) >> (64 - 8*i)
+var wordMask [maskLen]uint64 = (func() [maskLen]uint64 {
+	var res [maskLen]uint64
+
+	for i := range maskLen {
+		res[i] = ^uint64(0) >> (64 - 8*i)
 	}
-}
+
+	return res
+})()
 
 func setPrefix(n *node, p string) {
 	n.prefix = p
@@ -138,11 +143,12 @@ func (c *nodeCold) recomputeWildcardMinRuns() {
 }
 
 func (n *node) recomputeHasParams(nodes []node) bool {
-	if len(n.wildcards()) > 0 || n.flags&flagHasCatchAll != 0 {
+	if n.numWildcards() > 0 || n.flags&flagHasCatchAll != 0 {
 		return true
 	}
 
-	for _, c := range n.children {
+	for i := range len(n.children) {
+		c := n.children[i]
 		if nodes[nodePtr(c.n)].flags&flagHasParams != 0 {
 			return true
 		}
@@ -174,7 +180,7 @@ func compactNodes(nodes []node) []node {
 	}
 
 	compacted := make([]node, 0, len(nodes)-empty)
-	for i := range nodes {
+	for i := range len(nodes) {
 		if i == 0 || !nodes[i].isEmpty() {
 			mapping[i] = nodePtr(len(compacted))
 			compacted = append(compacted, nodes[i])
@@ -185,7 +191,7 @@ func compactNodes(nodes []node) []node {
 		compacted[0] = node{handlerIdx: -1, slashChild: -1}
 	}
 
-	for i := range compacted {
+	for i := range len(compacted) {
 		n := &compacted[i]
 
 		if n.slashChild >= 0 {
@@ -196,11 +202,11 @@ func compactNodes(nodes []node) []node {
 			n.cold.catchAllNode = mapping[n.cold.catchAllNode]
 		}
 
-		for j := range n.children {
+		for j := range len(n.children) {
 			n.children[j].n = int16(mapping[nodePtr(n.children[j].n)])
 		}
 
-		for j := range n.wildcards() {
+		for j := range n.numWildcards() {
 			n.cold.wildcard[j].node = mapping[n.cold.wildcard[j].node]
 		}
 	}
@@ -233,7 +239,7 @@ func insertParamRun(
 ) bool {
 	n := &(*nodes)[nodeIdx]
 
-	for i := range n.wildcards() {
+	for i := range n.numWildcards() {
 		if n.cold.wildcard[i].params[0] != names[0] {
 			continue
 		}
@@ -317,7 +323,7 @@ func removeParamRun(
 ) bool {
 	n := &nodes[nodeIdx]
 
-	for i := range n.wildcards() {
+	for i := range n.numWildcards() {
 		if n.cold.wildcard[i].params[0] != names[0] {
 			continue
 		}
@@ -331,7 +337,7 @@ func removeParamRun(
 		if nodes[n.cold.wildcard[i].node].isEmpty() {
 			n.cold.wildcard = slices.Delete(n.cold.wildcard, i, i+1)
 			n.cold.recomputeWildcardMinRuns()
-			setFlag(&n.flags, flagHasWildcard, len(n.wildcards()) > 0)
+			setFlag(&n.flags, flagHasWildcard, n.numWildcards() > 0)
 		}
 
 		setFlag(&n.flags, flagHasParams, n.recomputeHasParams(nodes))
@@ -364,7 +370,7 @@ func removeWildcardRun(
 	}
 
 	cont := &nodes[wc.node]
-	for i := range cont.wildcards() {
+	for i := range cont.numWildcards() {
 		if cont.cold.wildcard[i].params[0] != names[0] {
 			continue
 		}
@@ -378,8 +384,9 @@ func removeWildcardRun(
 		if nodes[cont.cold.wildcard[i].node].isEmpty() {
 			cont.cold.wildcard = slices.Delete(cont.cold.wildcard, i, i+1)
 			cont.cold.recomputeWildcardMinRuns()
-			setFlag(&cont.flags, flagHasWildcard, len(cont.wildcards()) > 0)
+			setFlag(&cont.flags, flagHasWildcard, cont.numWildcards() > 0)
 		}
+
 		setFlag(&cont.flags, flagHasParams, cont.recomputeHasParams(nodes))
 
 		return true
@@ -429,9 +436,10 @@ func (n *node) canBacktrack(path string, idx, l, wi int) bool {
 		return true
 	}
 
-	if wi >= len(n.wildcards()) {
+	if wi >= n.numWildcards() {
 		return false
 	}
+
 	need := int(n.cold.wildcard[wi].minRun)
 	if need == 0 {
 		return false
@@ -843,7 +851,7 @@ func remove(nodes []node, nodeIdx nodePtr, pathSeq []string) bool {
 		rest := pathSeq[len(run):]
 
 		names := make([]string, len(run))
-		for i := range run {
+		for i := range len(run) {
 			names[i] = paramName(run[i])
 		}
 
@@ -854,7 +862,7 @@ func remove(nodes []node, nodeIdx nodePtr, pathSeq []string) bool {
 	best := 0
 	b := currentSegment[0]
 
-	for i := range n.children {
+	for i := range len(n.children) {
 		if b < n.children[i].b {
 			break
 		}

@@ -131,8 +131,8 @@ func (n *node) isEmpty() bool {
 func (c *nodeCold) recomputeWildcardMinRuns() {
 	m := uint8(0)
 
-	for i := len(c.wildcard) - 1; i >= 0; i-- {
-		p := uint8(len(c.wildcard[i].params))
+	for i, v := range slices.Backward(c.wildcard) {
+		p := uint8(len(v.params))
 
 		if m == 0 || p < m {
 			m = p

@@ -41,8 +41,8 @@ type node struct {
 
 type nodeCold struct {
 	wildcard     []wildcard
-	catchAllName string
 	catchAllNode nodePtr
+	catchAllName paramID
 }
 
 func (n *node) ensureCold() *nodeCold {
@@ -66,7 +66,7 @@ type childRef struct {
 }
 
 type wildcard struct {
-	params []string
+	params []paramID
 	node   nodePtr
 	minRun uint8
 }
@@ -162,10 +162,17 @@ func newNode(nodes *[]node) nodePtr {
 	return nodePtr(len(*nodes) - 1)
 }
 
-func compactNodes(nodes []node) []node {
+func compactNodes(nodes []node, roots *[methodCount]nodePtr) []node {
+	pinned := make([]bool, len(nodes))
+	for _, r := range roots {
+		if r >= 0 {
+			pinned[r] = true
+		}
+	}
+
 	empty := 0
-	for i := 1; i < len(nodes); i++ {
-		if nodes[i].isEmpty() {
+	for i := range nodes {
+		if !pinned[i] && nodes[i].isEmpty() {
 			empty++
 		}
 	}
@@ -181,14 +188,20 @@ func compactNodes(nodes []node) []node {
 
 	compacted := make([]node, 0, len(nodes)-empty)
 	for i := range len(nodes) {
-		if i == 0 || !nodes[i].isEmpty() {
+		if pinned[i] || !nodes[i].isEmpty() {
 			mapping[i] = nodePtr(len(compacted))
 			compacted = append(compacted, nodes[i])
 		}
 	}
 
-	if compacted[0].isEmpty() {
-		compacted[0] = node{handlerIdx: -1, slashChild: -1}
+	for m := range roots {
+		if roots[m] >= 0 {
+			roots[m] = mapping[roots[m]]
+
+			if compacted[roots[m]].isEmpty() {
+				compacted[roots[m]] = node{handlerIdx: -1, slashChild: -1}
+			}
+		}
 	}
 
 	for i := range len(compacted) {
@@ -222,7 +235,7 @@ func collectParamRun(pathSeq []string) []string {
 	return pathSeq[:i]
 }
 
-func commonPrefixLen(a, b []string) int {
+func commonPrefixLen[T comparable](a, b []T) int {
 	i := 0
 	for i < len(a) && i < len(b) && a[i] == b[i] {
 		i++
@@ -233,7 +246,7 @@ func commonPrefixLen(a, b []string) int {
 func insertParamRun(
 	nodes *[]node,
 	nodeIdx nodePtr,
-	names []string,
+	names []paramID,
 	rest []string,
 	handlerIdx handlerPtr,
 ) bool {
@@ -274,7 +287,7 @@ func insertWildcardRun(
 	nodes *[]node,
 	parentIdx nodePtr,
 	wcIdx int,
-	names []string,
+	names []paramID,
 	rest []string,
 	handlerIdx handlerPtr,
 ) bool {
@@ -318,7 +331,7 @@ func splitWildcard(nodes *[]node, parentIdx nodePtr, wcIdx int, cp int) {
 func removeParamRun(
 	nodes []node,
 	nodeIdx nodePtr,
-	names []string,
+	names []paramID,
 	rest []string,
 ) bool {
 	n := &nodes[nodeIdx]
@@ -352,7 +365,7 @@ func removeWildcardRun(
 	nodes []node,
 	parentIdx nodePtr,
 	wcIdx int,
-	names []string,
+	names []paramID,
 	rest []string,
 ) bool {
 	wc := &nodes[parentIdx].cold.wildcard[wcIdx]
@@ -466,9 +479,9 @@ func (n *node) canBacktrack(path string, idx, l, wi int) bool {
 	return true
 }
 
-func search(nodes []node, path string, params *Params) handlerPtr {
+func search(nodes []node, root nodePtr, path string, params *Params) handlerPtr {
 	l := len(path)
-	n := nodePtr(0)
+	n := root
 	idx := 0
 	wi := 0
 	nn := &nodes[n]
@@ -507,7 +520,8 @@ descent:
 
 			rem := l - idx
 
-			for i := range nn.children {
+			nlen := len(nn.children)
+			for i := range nlen {
 				c := nn.children[i]
 
 				if b != c.b {
@@ -675,7 +689,7 @@ func insert(
 	n := &(*nodes)[nodeIdx]
 
 	if isCatchAll(currentSegment) {
-		name := catchAllName(currentSegment)
+		name := mustInternName(catchAllName(currentSegment))
 
 		if n.flags&flagHasCatchAll == 0 {
 			childIdx := newNode(nodes)
@@ -702,9 +716,9 @@ func insert(
 		run := collectParamRun(pathSeq)
 		rest := pathSeq[len(run):]
 
-		names := make([]string, len(run))
+		names := make([]paramID, len(run))
 		for i := range run {
-			names[i] = paramName(run[i])
+			names[i] = mustInternName(paramName(run[i]))
 		}
 
 		return insertParamRun(nodes, nodeIdx, names, rest, handlerIdx)
@@ -831,14 +845,14 @@ func remove(nodes []node, nodeIdx nodePtr, pathSeq []string) bool {
 
 	if isCatchAll(currentSegment) {
 		if n.flags&flagHasCatchAll == 0 || n.cold == nil ||
-			n.cold.catchAllName != catchAllName(currentSegment) {
+			n.cold.catchAllName != mustInternName(catchAllName(currentSegment)) {
 			return false
 		}
 
 		removed := remove(nodes, n.cold.catchAllNode, pathSeq[1:])
 		if removed && nodes[n.cold.catchAllNode].isEmpty() {
 			n.flags &^= flagHasCatchAll
-			n.cold.catchAllName = ""
+			n.cold.catchAllName = 0
 		}
 
 		setFlag(&n.flags, flagHasParams, n.recomputeHasParams(nodes))
@@ -850,9 +864,9 @@ func remove(nodes []node, nodeIdx nodePtr, pathSeq []string) bool {
 		run := collectParamRun(pathSeq)
 		rest := pathSeq[len(run):]
 
-		names := make([]string, len(run))
+		names := make([]paramID, len(run))
 		for i := range len(run) {
-			names[i] = paramName(run[i])
+			names[i] = mustInternName(paramName(run[i]))
 		}
 
 		return removeParamRun(nodes, nodeIdx, names, rest)

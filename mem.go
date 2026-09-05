@@ -8,9 +8,11 @@ func (r *Router[T]) MemSize() uintptr {
 	size := unsafe.Sizeof(*r)
 
 	for m := methodGet; m < methodCount; m++ {
-		size += staticMapMemSize(r.static[m])
+		size += staticTableMemSize(&r.static[m])
+	}
 
-		nodes := r.nodes[m]
+	{
+		nodes := r.nodes
 		size += uintptr(cap(nodes)) * unsafe.Sizeof(node{})
 
 		for i := range nodes {
@@ -24,43 +26,27 @@ func (r *Router[T]) MemSize() uintptr {
 			}
 
 			size += unsafe.Sizeof(nodeCold{})
-			size += uintptr(len(n.cold.catchAllName))
 			size += uintptr(cap(n.cold.wildcard)) * unsafe.Sizeof(wildcard{})
 
 			for j := range n.cold.wildcard {
 				w := &n.cold.wildcard[j]
 
-				size += uintptr(cap(w.params)) * unsafe.Sizeof("")
-
-				for _, p := range w.params {
-					size += uintptr(len(p))
-				}
+				size += uintptr(cap(w.params)) * unsafe.Sizeof(paramID(0))
 			}
 		}
 
 		var zero T
-		size += uintptr(cap(r.handlers[m])) * unsafe.Sizeof(zero)
+		size += uintptr(cap(r.handlers)) * unsafe.Sizeof(zero)
 	}
 
 	return size
 }
 
-func staticMapMemSize(t map[string]handlerPtr) uintptr {
-	if t == nil {
-		return 0
-	}
+func staticTableMemSize(t *staticTable) uintptr {
+	size := uintptr(cap(t.entries)) * unsafe.Sizeof(staticEntry{})
 
-	size := unsafe.Sizeof(t)
-
-	slotSize := unsafe.Sizeof(uint8(0)) + unsafe.Sizeof("") + unsafe.Sizeof(handlerPtr(0))
-	slots := 8
-	for slots < len(t) {
-		slots *= 2
-	}
-	size += uintptr(slots) * slotSize
-
-	for key := range t {
-		size += uintptr(len(key))
+	for i := range t.entries {
+		size += uintptr(len(t.entries[i].key))
 	}
 
 	return size

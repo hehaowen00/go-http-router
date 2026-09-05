@@ -8,18 +8,24 @@ const maxParams = 32
 
 // cannot have more than 32 params
 // paths are validated on router build to not have more than 32 params
+// Field order is load-bearing: idx sits immediately before entries so that
+// recording a param touches one cache line instead of two. With entries first
+// idx landed at offset 768, twelve lines away from the entry being written,
+// and every set paid for both.
 type Params struct {
-	entries [maxParams]param
 	idx     paramsIndex
+	entries [maxParams]param
 	path    string
 }
 
 type paramsIndex int
 
+// key is a paramID rather than a string so that recording a param stores no
+// pointer: no GC write barrier, and 12 bytes instead of 24.
 type param struct {
-	key        string
 	valueStart int32
 	valueEnd   int32
+	key        paramID
 }
 
 func (p *Params) Use(req *http.Request) {
@@ -29,8 +35,9 @@ func (p *Params) Use(req *http.Request) {
 func (p *Params) Get(key string) string {
 	for idx := range p.idx {
 		e := p.entries[idx]
+		k := nameOf(e.key)
 
-		if key[0] == e.key[0] && key == e.key {
+		if key == k {
 			if len(p.path) < int(e.valueEnd) {
 				return ""
 			}
@@ -42,8 +49,8 @@ func (p *Params) Get(key string) string {
 	return ""
 }
 
-func (p *Params) set(key string, valueStart, valueEnd int32) {
-	p.entries[p.idx] = param{key, valueStart, valueEnd}
+func (p *Params) set(key paramID, valueStart, valueEnd int32) {
+	p.entries[p.idx] = param{valueStart, valueEnd, key}
 	p.idx++
 }
 

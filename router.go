@@ -92,7 +92,6 @@ func (r *Router[T]) Add(method string, path string, handler T) error {
 
 	insert(&r.nodes, r.roots[m], sequence, idx)
 	r.refreshStart(m)
-	refreshSearchTargets(r.nodes)
 
 	return nil
 }

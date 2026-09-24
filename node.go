@@ -281,8 +281,10 @@ func insertParamRun(
 	})
 	c.recomputeWildcardMinRuns()
 	n.flags |= flagHasWildcard | flagHasParams
+	wcIdx := len(c.wildcard) - 1
 
 	insert(nodes, childIdx, rest, handlerIdx)
+	refreshSearchTarget(*nodes, nodeIdx, wcIdx)
 
 	return true
 }
@@ -306,11 +308,18 @@ func insertWildcardRun(
 
 	names = names[cp:]
 
+	var newParam bool
 	if len(names) == 0 {
-		return insert(nodes, wc.node, rest, handlerIdx)
+		newParam = insert(nodes, wc.node, rest, handlerIdx)
+	} else {
+		newParam = insertParamRun(nodes, wc.node, names, rest, handlerIdx)
 	}
 
-	return insertParamRun(nodes, wc.node, names, rest, handlerIdx)
+	// Anything this insert changed lies under wc.node, so its search target
+	// is the only one that can have moved.
+	refreshSearchTarget(*nodes, parentIdx, wcIdx)
+
+	return newParam
 }
 
 func splitWildcard(nodes *[]node, parentIdx nodePtr, wcIdx int, cp int) {
@@ -327,6 +336,7 @@ func splitWildcard(nodes *[]node, parentIdx nodePtr, wcIdx int, cp int) {
 	mc := moved.ensureCold()
 	mc.wildcard = []wildcard{{params: remainder, node: oldNode}}
 	mc.recomputeWildcardMinRuns()
+	refreshSearchTarget(*nodes, newIdx, 0)
 
 	wc.node = newIdx
 	(*nodes)[parentIdx].cold.recomputeWildcardMinRuns()
@@ -970,15 +980,22 @@ func slashOnlyChild(n *node) (nodePtr, bool) {
 // target node. A param value always ends at '/' or the end of the path, so
 // the skipped node could only ever step into its '/' child, and past the end
 // the terminal check still sees the same handler.
+//
+// Insert keeps targets current one wildcard at a time; this full pass is only
+// needed after compactNodes renumbers the arena.
 func refreshSearchTargets(nodes []node) {
 	for i := range nodes {
 		for j := range nodes[i].numWildcards() {
-			wc := &nodes[i].cold.wildcard[j]
-			wc.searchNode, wc.skip = wc.node, 0
-
-			if sc, ok := slashOnlyChild(&nodes[wc.node]); ok {
-				wc.searchNode, wc.skip = sc, 1
-			}
+			refreshSearchTarget(nodes, nodePtr(i), j)
 		}
+	}
+}
+
+func refreshSearchTarget(nodes []node, parent nodePtr, wcIdx int) {
+	wc := &nodes[parent].cold.wildcard[wcIdx]
+	wc.searchNode, wc.skip = wc.node, 0
+
+	if sc, ok := slashOnlyChild(&nodes[wc.node]); ok {
+		wc.searchNode, wc.skip = sc, 1
 	}
 }

@@ -26,7 +26,9 @@ func (r *Router[T]) MemSize() uintptr {
 			}
 
 			size += unsafe.Sizeof(nodeCold{})
-			size += uintptr(cap(n.cold.wildcard)) * unsafe.Sizeof(wildcard{})
+			if n.cold.wildcardSpill() {
+				size += uintptr(cap(n.cold.wildcard)) * unsafe.Sizeof(wildcard{})
+			}
 
 			for j := range n.cold.wildcard {
 				w := &n.cold.wildcard[j]

@@ -142,3 +142,59 @@ func TestIncrementalSearchTargets(t *testing.T) {
 		}
 	}
 }
+
+// nodeCold keeps its first wildcard inline and spills to the heap from the
+// second. Removing and re-adding across that boundary must keep every
+// remaining route intact.
+func TestWildcardInlineSpill(t *testing.T) {
+	r := New[int]()
+
+	routes := []string{"/a/:x/b", "/a/:y/c", "/a/:z/d"}
+	for i, route := range routes {
+		if err := r.Add("GET", route, i); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	check := func(path string, want int, key, value string) {
+		t.Helper()
+
+		var p Params
+		p.path = path
+
+		h := r.Search("GET", path, &p)
+		if want < 0 {
+			if h != nil {
+				t.Fatalf("Search(%q) = %d, want nil", path, *h)
+			}
+			return
+		}
+
+		if h == nil || *h != want {
+			t.Fatalf("Search(%q) = %v, want %d", path, h, want)
+		}
+
+		if got := p.Get(key); got != value {
+			t.Fatalf("Search(%q): %s = %q, want %q", path, key, got, value)
+		}
+	}
+
+	check("/a/1/b", 0, "x", "1")
+	check("/a/2/c", 1, "y", "2")
+	check("/a/3/d", 2, "z", "3")
+
+	r.Remove("GET", "/a/:y/c")
+	check("/a/1/b", 0, "x", "1")
+	check("/a/2/c", -1, "", "")
+	check("/a/3/d", 2, "z", "3")
+
+	r.Remove("GET", "/a/:x/b")
+	check("/a/1/b", -1, "", "")
+	check("/a/3/d", 2, "z", "3")
+
+	if err := r.Add("GET", "/a/:w/e", 3); err != nil {
+		t.Fatal(err)
+	}
+	check("/a/3/d", 2, "z", "3")
+	check("/a/4/e", 3, "w", "4")
+}

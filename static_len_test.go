@@ -121,3 +121,25 @@ func TestStaticLenRemoveRebuilds(t *testing.T) {
 		}
 	}
 }
+
+// Keys up to 16 bytes match on their first and last words alone, so every
+// byte must be covered by one of the two.
+func TestStaticWordsCoverShortKeys(t *testing.T) {
+	var st staticTable
+
+	for n := 1; n <= 24; n++ {
+		st.set("/"+strings.Repeat("a", n-1), handlerPtr(n))
+	}
+
+	for n := 1; n <= 24; n++ {
+		for i := 1; i < n; i++ {
+			b := []byte("/" + strings.Repeat("a", n-1))
+			b[i] = 'b'
+
+			lo, hi := st.bucket(n)
+			if _, ok := st.scan(string(b), lo, hi); ok {
+				t.Fatalf("len %d: key differing at byte %d matched", n, i)
+			}
+		}
+	}
+}

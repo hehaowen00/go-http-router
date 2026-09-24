@@ -2,8 +2,12 @@ package gohttprouter
 
 import "unsafe"
 
+// word and last are the key's first and last 8 bytes. Together they cover
+// every byte of a key up to 16 long, so those keys never need the full string
+// compare.
 type staticEntry struct {
 	word uint64
+	last uint64
 	key  string
 	idx  handlerPtr
 }
@@ -53,7 +57,19 @@ func (t *staticTable) scan(key string, lo, hi int) (handlerPtr, bool) {
 			break
 		}
 
-		if e.word == w && e.key == key {
+		if e.word != w {
+			continue
+		}
+
+		if n <= 16 {
+			if e.last == lastWord(key) {
+				return e.idx, true
+			}
+
+			continue
+		}
+
+		if e.key == key {
 			return e.idx, true
 		}
 	}
@@ -72,6 +88,16 @@ func keyWord(s string) uint64 {
 	}
 
 	return w
+}
+
+// lastWord is the key's last 8 bytes, or 0 for keys shorter than 8, whose
+// first word already covers them.
+func lastWord(s string) uint64 {
+	if len(s) < 8 {
+		return 0
+	}
+
+	return *(*uint64)(unsafe.Add(unsafe.Pointer(unsafe.StringData(s)), len(s)-8))
 }
 
 func (t *staticTable) lowerBound(n int) int {
@@ -106,7 +132,12 @@ func (t *staticTable) set(key string, idx handlerPtr) {
 
 	t.entries = append(t.entries, staticEntry{})
 	copy(t.entries[i+1:], t.entries[i:])
-	t.entries[i] = staticEntry{word: keyWord(key), key: key, idx: idx}
+	t.entries[i] = staticEntry{
+		word: keyWord(key),
+		last: lastWord(key),
+		key:  key,
+		idx:  idx,
+	}
 	t.rebuildOffsets()
 }
 

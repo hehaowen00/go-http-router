@@ -1,6 +1,9 @@
 package gohttprouter
 
 import (
+	"fmt"
+	"math/rand"
+	"net/http"
 	"strings"
 	"testing"
 )
@@ -90,6 +93,33 @@ func BenchmarkParamMissSingle(b *testing.B) {
 	for i := 0; b.Loop(); i++ {
 		if r.Search("GET", "/users/123", &params) == nil {
 			b.Fatal("route not found")
+		}
+	}
+}
+
+// 2000 static routes of one length, requested in shuffled order. The GitHub
+// set never has more than 4 static routes of a length, so this is the only
+// benchmark that exercises a large bucket.
+func BenchmarkRouterManyStatic(b *testing.B) {
+	r := New[int]()
+
+	paths := make([]string, 2000)
+	for i := range paths {
+		paths[i] = fmt.Sprintf("/pages/p-%04d", i)
+		if err := r.Add(http.MethodGet, paths[i], i); err != nil {
+			b.Fatal(err)
+		}
+	}
+
+	rand.New(rand.NewSource(1)).Shuffle(len(paths), func(i, j int) {
+		paths[i], paths[j] = paths[j], paths[i]
+	})
+
+	params := Params{}
+
+	for i := 0; b.Loop(); i++ {
+		if r.Search(http.MethodGet, paths[i%len(paths)], &params) == nil {
+			b.Fatal("miss")
 		}
 	}
 }

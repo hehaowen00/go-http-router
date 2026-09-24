@@ -123,3 +123,27 @@ func BenchmarkRouterManyStatic(b *testing.B) {
 		}
 	}
 }
+
+// Building 2000 static routes of one length: set has to place each one in
+// an ever larger bucket.
+func BenchmarkBuildManyStatic(b *testing.B) {
+	paths := make([]string, 2000)
+	for i := range paths {
+		paths[i] = fmt.Sprintf("/pages/p-%04d", i)
+	}
+
+	rand.New(rand.NewSource(1)).Shuffle(len(paths), func(i, j int) {
+		paths[i], paths[j] = paths[j], paths[i]
+	})
+
+	b.ReportAllocs()
+
+	for b.Loop() {
+		r := New[int]()
+		for i, p := range paths {
+			if err := r.Add(http.MethodGet, p, i); err != nil {
+				b.Fatal(err)
+			}
+		}
+	}
+}

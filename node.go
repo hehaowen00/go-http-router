@@ -39,17 +39,29 @@ type node struct {
 	flags      uint8
 }
 
+// search reads only the fields before inline, so their offsets must not move.
 type nodeCold struct {
 	wildcard     []wildcard
 	catchAllNode nodePtr
 	catchAllName paramID
+	// Backing store for the first wildcard, so a node's cold data and its
+	// usual single wildcard are one allocation.
+	inline [1]wildcard
 }
 
 func (n *node) ensureCold() *nodeCold {
 	if n.cold == nil {
-		n.cold = &nodeCold{catchAllNode: -1}
+		c := &nodeCold{catchAllNode: -1}
+		c.wildcard = c.inline[:0]
+		n.cold = c
 	}
 	return n.cold
+}
+
+// wildcardSpill reports whether c.wildcard has outgrown inline and lives in
+// its own allocation.
+func (c *nodeCold) wildcardSpill() bool {
+	return cap(c.wildcard) > 0 && &c.wildcard[:1][0] != &c.inline[0]
 }
 
 func (n *node) numWildcards() int {
@@ -252,6 +264,7 @@ func insertParamRun(
 	nodeIdx nodePtr,
 	names []paramID,
 	rest []string,
+	restIDs []paramID,
 	handlerIdx handlerPtr,
 ) bool {
 	n := &(*nodes)[nodeIdx]
@@ -261,7 +274,7 @@ func insertParamRun(
 			continue
 		}
 
-		newParam := insertWildcardRun(nodes, nodeIdx, i, names, rest, handlerIdx)
+		newParam := insertWildcardRun(nodes, nodeIdx, i, names, rest, restIDs, handlerIdx)
 
 		n = &(*nodes)[nodeIdx]
 		if newParam {
@@ -275,15 +288,17 @@ func insertParamRun(
 	n = &(*nodes)[nodeIdx]
 
 	c := n.ensureCold()
+	// names may alias the caller's stack buffer, so the stored copy is
+	// taken here, where it is kept.
 	c.wildcard = append(c.wildcard, wildcard{
-		params: names,
+		params: slices.Clone(names),
 		node:   childIdx,
 	})
 	c.recomputeWildcardMinRuns()
 	n.flags |= flagHasWildcard | flagHasParams
 	wcIdx := len(c.wildcard) - 1
 
-	insert(nodes, childIdx, rest, handlerIdx)
+	insert(nodes, childIdx, rest, restIDs, handlerIdx)
 	refreshSearchTarget(*nodes, nodeIdx, wcIdx)
 
 	return true
@@ -295,6 +310,7 @@ func insertWildcardRun(
 	wcIdx int,
 	names []paramID,
 	rest []string,
+	restIDs []paramID,
 	handlerIdx handlerPtr,
 ) bool {
 	wc := &(*nodes)[parentIdx].cold.wildcard[wcIdx]
@@ -310,9 +326,9 @@ func insertWildcardRun(
 
 	var newParam bool
 	if len(names) == 0 {
-		newParam = insert(nodes, wc.node, rest, handlerIdx)
+		newParam = insert(nodes, wc.node, rest, restIDs, handlerIdx)
 	} else {
-		newParam = insertParamRun(nodes, wc.node, names, rest, handlerIdx)
+		newParam = insertParamRun(nodes, wc.node, names, rest, restIDs, handlerIdx)
 	}
 
 	// Anything this insert changed lies under wc.node, so its search target
@@ -713,10 +729,13 @@ descent:
 	}
 }
 
+// ids[i] is the interned name of pathSeq[i] when it is a param or catch-all,
+// resolved once by Add, and is unused for static segments.
 func insert(
 	nodes *[]node,
 	nodeIdx nodePtr,
 	pathSeq []string,
+	ids []paramID,
 	handlerIdx handlerPtr,
 ) (newParam bool) {
 	if len(pathSeq) == 0 {
@@ -728,7 +747,7 @@ func insert(
 	n := &(*nodes)[nodeIdx]
 
 	if isCatchAll(currentSegment) {
-		name := mustInternName(catchAllName(currentSegment))
+		name := ids[0]
 
 		if n.flags&flagHasCatchAll == 0 {
 			childIdx := newNode(nodes)
@@ -743,7 +762,7 @@ func insert(
 			n.cold.catchAllName = name
 		}
 
-		insert(nodes, (*nodes)[nodeIdx].cold.catchAllNode, pathSeq[1:], handlerIdx)
+		insert(nodes, (*nodes)[nodeIdx].cold.catchAllNode, pathSeq[1:], ids[1:], handlerIdx)
 
 		n = &(*nodes)[nodeIdx]
 		n.flags |= flagHasParams
@@ -752,15 +771,11 @@ func insert(
 	}
 
 	if isParam(currentSegment) {
-		run := collectParamRun(pathSeq)
-		rest := pathSeq[len(run):]
+		k := len(collectParamRun(pathSeq))
 
-		names := make([]paramID, len(run))
-		for i := range run {
-			names[i] = mustInternName(paramName(run[i]))
-		}
-
-		return insertParamRun(nodes, nodeIdx, names, rest, handlerIdx)
+		return insertParamRun(
+			nodes, nodeIdx, ids[:k], pathSeq[k:], ids[k:], handlerIdx,
+		)
 	}
 
 	closestIdx := -1
@@ -790,6 +805,7 @@ func insert(
 			nodes,
 			childIdx,
 			pathSeq[1:],
+			ids[1:],
 			handlerIdx,
 		)
 
@@ -811,6 +827,7 @@ func insert(
 	if len(closest.prefix) == best {
 		if best == len(pathSeq[0]) {
 			pathSeq = pathSeq[1:]
+			ids = ids[1:]
 		} else {
 			pathSeq[0] = pathSeq[0][best:]
 		}
@@ -819,6 +836,7 @@ func insert(
 			nodes,
 			nodePtr(n.children[closestIdx].n),
 			pathSeq,
+			ids,
 			handlerIdx,
 		)
 
@@ -851,11 +869,12 @@ func insert(
 
 		if best >= len(currentSegment) {
 			pathSeq = pathSeq[1:]
+			ids = ids[1:]
 		} else {
 			pathSeq[0] = pathSeq[0][best:]
 		}
 
-		newParam = insert(nodes, newChildIdx, pathSeq, handlerIdx)
+		newParam = insert(nodes, newChildIdx, pathSeq, ids, handlerIdx)
 
 		if newParam {
 			(*nodes)[nodeIdx].flags |= flagHasParams

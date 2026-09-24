@@ -8,8 +8,57 @@ type staticEntry struct {
 	idx  handlerPtr
 }
 
+// Entries are sorted by key length. off[n] is the index of the first entry
+// with a key of length n or more, so keys shorter than staticLenBits find
+// their bucket with two loads instead of a binary search. Longer keys all sit
+// from off[staticLenBits] onwards and fall back to lowerBound.
 type staticTable struct {
 	entries []staticEntry
+	off     [staticLenBits + 1]uint16
+}
+
+const maxStaticRoutes = 1<<16 - 1
+
+func (t *staticTable) rebuildOffsets() {
+	i := 0
+
+	for n := range t.off {
+		for i < len(t.entries) && len(t.entries[i].key) < n {
+			i++
+		}
+
+		t.off[n] = uint16(i)
+	}
+}
+
+// bucket returns the entry range to scan for a key of length n. For long
+// keys the range runs to the end of the table and scan stops at the first
+// entry of another length.
+func (t *staticTable) bucket(n int) (int, int) {
+	if n < staticLenBits {
+		return int(t.off[n]), int(t.off[n+1])
+	}
+
+	return t.lowerBound(n), len(t.entries)
+}
+
+func (t *staticTable) scan(key string, lo, hi int) (handlerPtr, bool) {
+	n := len(key)
+	w := keyWord(key)
+
+	for i := lo; i < hi; i++ {
+		e := &t.entries[i]
+
+		if len(e.key) != n {
+			break
+		}
+
+		if e.word == w && e.key == key {
+			return e.idx, true
+		}
+	}
+
+	return 0, false
 }
 
 func keyWord(s string) uint64 {
@@ -41,22 +90,8 @@ func (t *staticTable) lowerBound(n int) int {
 }
 
 func (t *staticTable) get(key string) (handlerPtr, bool) {
-	n := len(key)
-	w := keyWord(key)
-
-	for i := t.lowerBound(n); i < len(t.entries); i++ {
-		e := &t.entries[i]
-
-		if len(e.key) != n {
-			break
-		}
-
-		if e.word == w && e.key == key {
-			return e.idx, true
-		}
-	}
-
-	return 0, false
+	lo, hi := t.bucket(len(key))
+	return t.scan(key, lo, hi)
 }
 
 func (t *staticTable) set(key string, idx handlerPtr) {
@@ -72,6 +107,7 @@ func (t *staticTable) set(key string, idx handlerPtr) {
 	t.entries = append(t.entries, staticEntry{})
 	copy(t.entries[i+1:], t.entries[i:])
 	t.entries[i] = staticEntry{word: keyWord(key), key: key, idx: idx}
+	t.rebuildOffsets()
 }
 
 func (t *staticTable) remove(key string) (handlerPtr, bool) {
@@ -83,6 +119,7 @@ func (t *staticTable) remove(key string) (handlerPtr, bool) {
 		if t.entries[i].key == key {
 			idx := t.entries[i].idx
 			t.entries = append(t.entries[:i], t.entries[i+1:]...)
+			t.rebuildOffsets()
 
 			return idx, true
 		}

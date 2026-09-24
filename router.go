@@ -33,7 +33,15 @@ func (r *Router[T]) Add(method string, path string, handler T) error {
 
 	if !strings.ContainsAny(path, ":*") {
 		key := normalizeStaticPath(path)
-		r.staticLen[m].set(len(key))
+
+		if _, ok := r.static[m].get(key); !ok &&
+			r.static[m].len() >= maxStaticRoutes {
+			return fmt.Errorf(
+				"too many static routes - limit %d per method",
+				maxStaticRoutes,
+			)
+		}
+
 		r.staticLen[m].setTail(key)
 
 		idx := handlerPtr(len(r.handlers))
@@ -111,9 +119,10 @@ func (r *Router[T]) Search(method string, path string, params *Params) *T {
 	}
 
 	key := staticKey(path)
+	st := &r.static[m]
 
-	if r.staticLen[m].has(len(key)) && r.staticLen[m].hasTail(key) {
-		if idx, ok := r.static[m].get(key); ok {
+	if lo, hi := st.bucket(len(key)); lo < hi && r.staticLen[m].hasTail(key) {
+		if idx, ok := st.scan(key, lo, hi); ok {
 			return r.handlerAt(m, idx)
 		}
 	}
@@ -156,7 +165,6 @@ func (r *Router[T]) refreshStaticLenSet(m methodEnum) {
 	r.staticLen[m] = staticLenFilter{}
 
 	for i := range r.static[m].entries {
-		r.staticLen[m].set(len(r.static[m].entries[i].key))
 		r.staticLen[m].setTail(r.static[m].entries[i].key)
 	}
 }

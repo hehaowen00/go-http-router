@@ -1,6 +1,7 @@
 package gohttprouter
 
 import (
+	"fmt"
 	"strconv"
 	"strings"
 	"testing"
@@ -140,6 +141,51 @@ func TestStaticWordsCoverShortKeys(t *testing.T) {
 			if _, ok := st.scan(string(b), lo, hi); ok {
 				t.Fatalf("len %d: key differing at byte %d matched", n, i)
 			}
+		}
+	}
+}
+
+// Buckets larger than staticLinearMax are binary searched, including long
+// keys that share their first and last words and differ only in the middle.
+func TestStaticLargeBuckets(t *testing.T) {
+	var st staticTable
+
+	var keys []string
+	for i := range 500 {
+		keys = append(keys, fmt.Sprintf("/pages/p-%04d", i))
+		keys = append(keys, fmt.Sprintf("/pages/aaaa%04dzzzz/end", i))
+	}
+
+	// Insert in a scrambled order so set has to place each key.
+	for i := range keys {
+		j := (i * 389) % len(keys)
+		st.set(keys[j], handlerPtr(j))
+	}
+
+	find := func(k string) (handlerPtr, bool) {
+		lo, hi := st.bucket(len(k))
+		return st.scan(k, lo, hi)
+	}
+
+	for i, k := range keys {
+		if idx, ok := find(k); !ok || idx != handlerPtr(i) {
+			t.Fatalf("scan(%q) = %d, %v, want %d", k, idx, ok, i)
+		}
+	}
+
+	for _, k := range []string{"/pages/p-9999", "/pages/p-000", "/pages/aaaa9999zzzz/end", "/pages/aaaa0000zzzz/enx"} {
+		if _, ok := find(k); ok {
+			t.Fatalf("scan(%q) found a key that was never set", k)
+		}
+	}
+
+	for i := 0; i < len(keys); i += 2 {
+		st.remove(keys[i])
+	}
+
+	for i, k := range keys {
+		if _, ok := find(k); ok != (i%2 == 1) {
+			t.Fatalf("after remove: scan(%q) found = %v", k, ok)
 		}
 	}
 }

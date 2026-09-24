@@ -12,7 +12,7 @@ type staticEntry struct {
 	idx  handlerPtr
 }
 
-// Entries are sorted by key length. off[n] is the index of the first entry
+// Entries are sorted by key length, then by (word, last, key) within a length. off[n] is the index of the first entry
 // with a key of length n or more, so keys shorter than staticLenBits find
 // their bucket with two loads instead of a binary search. Longer keys all sit
 // from off[staticLenBits] onwards and fall back to lowerBound.
@@ -46,9 +46,22 @@ func (t *staticTable) bucket(n int) (int, int) {
 	return t.lowerBound(n), len(t.entries)
 }
 
+// Buckets up to this size are scanned linearly; larger ones are binary
+// searched on (word, last). Keys of staticLenBits or more always scan
+// linearly, since bucket does not give their exact end.
+const staticLinearMax = 8
+
+func (e *staticEntry) before(w, lw uint64) bool {
+	return e.word < w || (e.word == w && e.last < lw)
+}
+
 func (t *staticTable) scan(key string, lo, hi int) (handlerPtr, bool) {
 	n := len(key)
 	w := keyWord(key)
+
+	if hi-lo > staticLinearMax && n < staticLenBits {
+		return t.search(key, w, lo, hi)
+	}
 
 	for i := lo; i < hi; i++ {
 		e := &t.entries[i]
@@ -70,6 +83,36 @@ func (t *staticTable) scan(key string, lo, hi int) (handlerPtr, bool) {
 		}
 
 		if e.key == key {
+			return e.idx, true
+		}
+	}
+
+	return 0, false
+}
+
+// search binary searches the bucket [lo, hi) for key. Keys up to 16 bytes
+// are unique by (word, last); longer keys that share both are compared in
+// full.
+func (t *staticTable) search(key string, w uint64, lo, hi int) (handlerPtr, bool) {
+	lw := lastWord(key)
+
+	for lo < hi {
+		mid := int(uint(lo+hi) >> 1)
+		if t.entries[mid].before(w, lw) {
+			lo = mid + 1
+		} else {
+			hi = mid
+		}
+	}
+
+	for i := lo; i < len(t.entries); i++ {
+		e := &t.entries[i]
+
+		if e.word != w || e.last != lw || len(e.key) != len(key) {
+			break
+		}
+
+		if len(key) <= 16 || e.key == key {
 			return e.idx, true
 		}
 	}
@@ -121,13 +164,24 @@ func (t *staticTable) get(key string) (handlerPtr, bool) {
 }
 
 func (t *staticTable) set(key string, idx handlerPtr) {
-	i := t.lowerBound(len(key))
+	lo, hi := t.lowerBound(len(key)), t.lowerBound(len(key)+1)
+	w, lw := keyWord(key), lastWord(key)
 
-	for ; i < len(t.entries) && len(t.entries[i].key) == len(key); i++ {
-		if t.entries[i].key == key {
-			t.entries[i].idx = idx
+	for j := lo; j < hi; j++ {
+		if t.entries[j].key == key {
+			t.entries[j].idx = idx
 			return
 		}
+	}
+
+	i := lo
+	for i < hi {
+		e := &t.entries[i]
+		if !e.before(w, lw) && (e.word != w || e.last != lw || e.key >= key) {
+			break
+		}
+
+		i++
 	}
 
 	t.entries = append(t.entries, staticEntry{})

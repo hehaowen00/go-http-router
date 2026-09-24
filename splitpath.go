@@ -3,15 +3,21 @@ package gohttprouter
 import "strings"
 
 func splitPath(path string) []string {
+	return splitPathInto(make([]string, 0, 4), path)
+}
+
+// splitPathInto appends path's segments to dst, so a caller can pass a stack
+// buffer: insert keeps the strings but never the slice.
+func splitPathInto(dst []string, path string) []string {
 	if len(path) == 0 {
-		return []string{"/"}
+		return append(dst, "/")
 	}
 
-	if res, ok := splitPathFast(path); ok {
+	if res, ok := splitPathFast(dst, path); ok {
 		return res
 	}
 
-	return splitPathSlow(path)
+	return splitPathSlow(dst, path)
 }
 
 func normalizeStaticPath(path string) string {
@@ -33,6 +39,11 @@ func normalizeStaticPath(path string) string {
 		if !strings.Contains(path[i:end], "//") {
 			if i == end {
 				return "/"
+			}
+
+			// With a single leading '/', "/" + path[i:end] is path[:end].
+			if i == 1 {
+				return path[:end]
 			}
 
 			return "/" + path[i:end]
@@ -66,7 +77,7 @@ func normalizeStaticPath(path string) string {
 	return "/" + path[i:end]
 }
 
-func splitPathFast(path string) ([]string, bool) {
+func splitPathFast(dst []string, path string) ([]string, bool) {
 	if path[0] != '/' {
 		return nil, false
 	}
@@ -82,10 +93,10 @@ func splitPathFast(path string) ([]string, bool) {
 	}
 
 	if i == end {
-		return []string{"/"}, true
+		return append(dst, "/"), true
 	}
 
-	res := make([]string, 0, 4)
+	res := dst
 	staticStart := -1
 
 	for i < end {
@@ -124,11 +135,11 @@ func splitPathFast(path string) ([]string, bool) {
 	return res, true
 }
 
-func splitPathSlow(path string) []string {
+func splitPathSlow(dst []string, path string) []string {
 	path = strings.TrimSpace(path)
 
 	if len(path) == 0 {
-		return []string{"/"}
+		return append(dst, "/")
 	}
 
 	if path[0] != '/' {
@@ -147,10 +158,10 @@ func splitPathSlow(path string) []string {
 	}
 
 	if i == end {
-		return []string{"/"}
+		return append(dst, "/")
 	}
 
-	res := make([]string, 0, 4)
+	res := dst
 	staticStart := -1
 
 	for i < end {

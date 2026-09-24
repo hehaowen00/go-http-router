@@ -34,12 +34,13 @@ func (r *Router[T]) Add(method string, path string, handler T) error {
 	if !strings.ContainsAny(path, ":*") {
 		key := normalizeStaticPath(path)
 
-		if _, ok := r.static[m].get(key); !ok &&
-			r.static[m].len() >= maxStaticRoutes {
-			return fmt.Errorf(
-				"too many static routes - limit %d per method",
-				maxStaticRoutes,
-			)
+		if r.static[m].len() >= maxStaticRoutes {
+			if _, ok := r.static[m].get(key); !ok {
+				return fmt.Errorf(
+					"too many static routes - limit %d per method",
+					maxStaticRoutes,
+				)
+			}
 		}
 
 		r.staticLen[m].setTail(key)
@@ -51,15 +52,18 @@ func (r *Router[T]) Add(method string, path string, handler T) error {
 		return nil
 	}
 
-	sequence := splitPath(path)
+	var segBuf [16]string
+	sequence := splitPathInto(segBuf[:0], path)
 
 	err := validateSeq(sequence)
 	if err != nil {
 		return fmt.Errorf("invalid path - %w", err)
 	}
 
-	// Reserve every name up front so the ids are guaranteed by the time
-	// insert reaches for them.
+	// Intern every name once, here, and hand the ids to insert.
+	var idBuf [16]paramID
+	ids := idBuf[:0]
+
 	for _, seg := range sequence {
 		var name string
 
@@ -69,15 +73,19 @@ func (r *Router[T]) Add(method string, path string, handler T) error {
 		case isCatchAll(seg):
 			name = catchAllName(seg)
 		default:
+			ids = append(ids, 0)
 			continue
 		}
 
-		if _, ok := internName(name); !ok {
+		id, ok := internName(name)
+		if !ok {
 			return fmt.Errorf(
 				"too many distinct param names - limit %d",
 				maxParamNames,
 			)
 		}
+
+		ids = append(ids, id)
 	}
 
 	if len(r.nodes)+2*len(sequence)+2 > maxTreeNodes {
@@ -98,7 +106,7 @@ func (r *Router[T]) Add(method string, path string, handler T) error {
 	idx := handlerPtr(len(r.handlers))
 	r.handlers = append(r.handlers, handler)
 
-	insert(&r.nodes, r.roots[m], sequence, idx)
+	insert(&r.nodes, r.roots[m], sequence, ids, idx)
 	r.refreshStart(m)
 
 	return nil

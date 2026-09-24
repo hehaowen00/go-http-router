@@ -23,15 +23,11 @@ type staticTable struct {
 
 const maxStaticRoutes = 1<<16 - 1
 
-func (t *staticTable) rebuildOffsets() {
-	i := 0
-
-	for n := range t.off {
-		for i < len(t.entries) && len(t.entries[i].key) < n {
-			i++
-		}
-
-		t.off[n] = uint16(i)
+// shiftOffsets adjusts off after an entry of length n is inserted (d = 1)
+// or removed (d = -1): only buckets for longer keys move.
+func (t *staticTable) shiftOffsets(n int, d int) {
+	for k := n + 1; k < len(t.off); k++ {
+		t.off[k] = uint16(int(t.off[k]) + d)
 	}
 }
 
@@ -167,21 +163,27 @@ func (t *staticTable) set(key string, idx handlerPtr) {
 	lo, hi := t.lowerBound(len(key)), t.lowerBound(len(key)+1)
 	w, lw := keyWord(key), lastWord(key)
 
-	for j := lo; j < hi; j++ {
-		if t.entries[j].key == key {
-			t.entries[j].idx = idx
-			return
+	for lo < hi {
+		mid := int(uint(lo+hi) >> 1)
+		if t.entries[mid].before(w, lw) {
+			lo = mid + 1
+		} else {
+			hi = mid
 		}
 	}
 
+	// Entries sharing (word, last) are ordered by key.
 	i := lo
-	for i < hi {
+	for ; i < len(t.entries); i++ {
 		e := &t.entries[i]
-		if !e.before(w, lw) && (e.word != w || e.last != lw || e.key >= key) {
+		if len(e.key) != len(key) || e.word != w || e.last != lw || e.key > key {
 			break
 		}
 
-		i++
+		if e.key == key {
+			e.idx = idx
+			return
+		}
 	}
 
 	t.entries = append(t.entries, staticEntry{})
@@ -192,7 +194,7 @@ func (t *staticTable) set(key string, idx handlerPtr) {
 		key:  key,
 		idx:  idx,
 	}
-	t.rebuildOffsets()
+	t.shiftOffsets(len(key), 1)
 }
 
 func (t *staticTable) remove(key string) (handlerPtr, bool) {
@@ -204,7 +206,7 @@ func (t *staticTable) remove(key string) (handlerPtr, bool) {
 		if t.entries[i].key == key {
 			idx := t.entries[i].idx
 			t.entries = append(t.entries[:i], t.entries[i+1:]...)
-			t.rebuildOffsets()
+			t.shiftOffsets(len(key), -1)
 
 			return idx, true
 		}

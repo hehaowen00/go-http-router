@@ -189,3 +189,42 @@ func TestStaticLargeBuckets(t *testing.T) {
 		}
 	}
 }
+
+// off must match a full recount after every set and remove.
+func TestStaticOffsetsIncremental(t *testing.T) {
+	var st staticTable
+
+	recount := func() [staticLenBits + 1]uint16 {
+		var off [staticLenBits + 1]uint16
+		for n := range off {
+			for _, e := range st.entries {
+				if len(e.key) < n {
+					off[n]++
+				}
+			}
+		}
+		return off
+	}
+
+	var keys []string
+	for i := range 300 {
+		keys = append(keys, "/"+strings.Repeat("k", (i*37)%270)+strconv.Itoa(i))
+	}
+
+	for i, k := range keys {
+		st.set(k, handlerPtr(i))
+		st.set(k, handlerPtr(i)) // replacing must not shift offsets
+		if st.off != recount() {
+			t.Fatalf("offsets wrong after set %d (len %d)", i, len(k))
+		}
+	}
+
+	for i, k := range keys {
+		if i%3 == 0 {
+			st.remove(k)
+			if st.off != recount() {
+				t.Fatalf("offsets wrong after remove %d (len %d)", i, len(k))
+			}
+		}
+	}
+}

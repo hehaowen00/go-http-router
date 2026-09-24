@@ -422,11 +422,13 @@ func removeWildcardRun(
 	return false
 }
 
+// Fields are int32 so a frame is 16 bytes: search zeroes the inline frames
+// on every call, and a push is two stores instead of four.
 type searchFrame struct {
 	n         nodePtr
-	idx       int
-	paramsIdx paramsIndex
-	wi        int
+	idx       int32
+	paramsIdx int32
+	wi        int32
 }
 
 type frameStack struct {
@@ -522,7 +524,7 @@ descent:
 			if b == '/' {
 				if sc := nn.slashChild; sc >= 0 {
 					if hasWild {
-						stack.push(searchFrame{n, idx, params.save(), 0})
+						stack.push(searchFrame{n, int32(idx), int32(params.save()), 0})
 					}
 
 					n = nodePtr(sc)
@@ -548,7 +550,7 @@ descent:
 
 				if pLen == 1 {
 					if hasWild {
-						stack.push(searchFrame{n, idx, params.save(), 0})
+						stack.push(searchFrame{n, int32(idx), int32(params.save()), 0})
 					}
 
 					n = cnode
@@ -562,7 +564,7 @@ descent:
 						sd := unsafe.StringData(path)
 						if *(*uint64)(unsafe.Add(unsafe.Pointer(sd), idx))&wordMask[pLen] == child.prefixWord {
 							if hasWild {
-								stack.push(searchFrame{n, idx, params.save(), 0})
+								stack.push(searchFrame{n, int32(idx), int32(params.save()), 0})
 							}
 
 							n = cnode
@@ -577,7 +579,7 @@ descent:
 						w := *(*uint64)(unsafe.Add(unsafe.Pointer(sd), idx+pLen-8))
 						if w>>(8*(8-pLen)) == child.prefixWord {
 							if hasWild {
-								stack.push(searchFrame{n, idx, params.save(), 0})
+								stack.push(searchFrame{n, int32(idx), int32(params.save()), 0})
 							}
 
 							n = cnode
@@ -587,7 +589,7 @@ descent:
 						}
 					} else if path[idx:idx+pLen] == child.prefix {
 						if hasWild {
-							stack.push(searchFrame{n, idx, params.save(), 0})
+							stack.push(searchFrame{n, int32(idx), int32(params.save()), 0})
 						}
 
 						n = cnode
@@ -626,10 +628,10 @@ descent:
 
 		{
 			f := stack.pop()
-			params.restore(f.paramsIdx)
+			params.restore(paramsIndex(f.paramsIdx))
 			n = f.n
-			idx = f.idx
-			wi = f.wi
+			idx = int(f.idx)
+			wi = int(f.wi)
 			nn = &nodes[n]
 		}
 
@@ -687,7 +689,7 @@ descent:
 				continue descent
 			}
 
-			stack.push(searchFrame{n, idx, saved, wi + 1})
+			stack.push(searchFrame{n, int32(idx), int32(saved), int32(wi + 1)})
 			n = wc.searchNode
 			idx = next + int(wc.skip)
 			nn = &nodes[n]

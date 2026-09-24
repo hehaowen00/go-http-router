@@ -68,7 +68,11 @@ type childRef struct {
 type wildcard struct {
 	params []paramID
 	node   nodePtr
-	minRun uint8
+	// Where search resumes after matching this wildcard; see
+	// refreshSearchTargets. insert and remove only ever use node.
+	searchNode nodePtr
+	minRun     uint8
+	skip       uint8
 }
 
 const maskLen = 9
@@ -479,10 +483,10 @@ func (n *node) canBacktrack(path string, idx, l, wi int) bool {
 	return true
 }
 
-func search(nodes []node, root nodePtr, path string, params *Params) handlerPtr {
+func search(nodes []node, root nodePtr, start int, path string, params *Params) handlerPtr {
 	l := len(path)
 	n := root
-	idx := 0
+	idx := start
 	wi := 0
 	nn := &nodes[n]
 	var stack frameStack
@@ -556,6 +560,21 @@ descent:
 							nn = child
 							continue descent
 						}
+					} else if pLen <= 8 && idx+pLen >= 8 {
+						// Short tail: load the 8 bytes ending at the prefix's
+						// end and shift the prefix down into the low bytes.
+						sd := unsafe.StringData(path)
+						w := *(*uint64)(unsafe.Add(unsafe.Pointer(sd), idx+pLen-8))
+						if w>>(8*(8-pLen)) == child.prefixWord {
+							if hasWild {
+								stack.push(searchFrame{n, idx, params.save(), 0})
+							}
+
+							n = cnode
+							idx += pLen
+							nn = child
+							continue descent
+						}
 					} else if path[idx:idx+pLen] == child.prefix {
 						if hasWild {
 							stack.push(searchFrame{n, idx, params.save(), 0})
@@ -568,9 +587,17 @@ descent:
 					}
 				}
 
-				if pLen == rem+1 && child.flags&flagPrefixEndsSlash != 0 &&
-					path[idx:] == child.prefix[:rem] {
-					if child.handlerIdx >= 0 {
+				if pLen == rem+1 && child.flags&flagPrefixEndsSlash != 0 {
+					var ok bool
+					if rem <= 8 && l >= 8 {
+						sd := unsafe.StringData(path)
+						w := *(*uint64)(unsafe.Add(unsafe.Pointer(sd), l-8))
+						ok = w>>(8*(8-rem)) == child.prefixWord&wordMask[rem]
+					} else {
+						ok = path[idx:] == child.prefix[:rem]
+					}
+
+					if ok && child.handlerIdx >= 0 {
 						return child.handlerIdx
 					}
 				}
@@ -637,22 +664,22 @@ descent:
 			}
 
 			if wi == len(nn.cold.wildcard)-1 && nn.flags&flagHasCatchAll == 0 {
-				n = wc.node
-				idx = next
+				n = wc.searchNode
+				idx = next + int(wc.skip)
 				nn = &nodes[n]
 				continue descent
 			}
 
 			if !nn.canBacktrack(path, idx, l, wi+1) {
-				n = wc.node
-				idx = next
+				n = wc.searchNode
+				idx = next + int(wc.skip)
 				nn = &nodes[n]
 				continue descent
 			}
 
 			stack.push(searchFrame{n, idx, saved, wi + 1})
-			n = wc.node
-			idx = next
+			n = wc.searchNode
+			idx = next + int(wc.skip)
 			nn = &nodes[n]
 			continue descent
 		}
@@ -926,4 +953,32 @@ func remove(nodes []node, nodeIdx nodePtr, pathSeq []string) bool {
 	setFlag(&n.flags, flagHasParams, n.recomputeHasParams(nodes))
 
 	return true
+}
+
+// slashOnlyChild reports the '/' child of a node whose only way forward is
+// that child: no handler, no wildcard or catch-all, no other children.
+func slashOnlyChild(n *node) (nodePtr, bool) {
+	if n.handlerIdx < 0 && n.slashChild >= 0 && len(n.children) == 1 &&
+		n.flags&(flagHasWildcard|flagHasCatchAll) == 0 {
+		return nodePtr(n.slashChild), true
+	}
+
+	return -1, false
+}
+
+// refreshSearchTargets points every wildcard's searchNode past a slash-only
+// target node. A param value always ends at '/' or the end of the path, so
+// the skipped node could only ever step into its '/' child, and past the end
+// the terminal check still sees the same handler.
+func refreshSearchTargets(nodes []node) {
+	for i := range nodes {
+		for j := range nodes[i].numWildcards() {
+			wc := &nodes[i].cold.wildcard[j]
+			wc.searchNode, wc.skip = wc.node, 0
+
+			if sc, ok := slashOnlyChild(&nodes[wc.node]); ok {
+				wc.searchNode, wc.skip = sc, 1
+			}
+		}
+	}
 }

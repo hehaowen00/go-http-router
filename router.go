@@ -11,6 +11,7 @@ type Router[T any] struct {
 	staticLen [methodCount]staticLenFilter
 	nodes     []node
 	roots     [methodCount]nodePtr
+	starts    [methodCount]searchStart
 	handlers  []T
 }
 
@@ -18,6 +19,7 @@ func New[T any]() *Router[T] {
 	r := &Router[T]{}
 	for i := range r.roots {
 		r.roots[i] = -1
+		r.starts[i] = searchStart{n: -1}
 	}
 
 	return r
@@ -32,6 +34,7 @@ func (r *Router[T]) Add(method string, path string, handler T) error {
 	if !strings.ContainsAny(path, ":*") {
 		key := normalizeStaticPath(path)
 		r.staticLen[m].set(len(key))
+		r.staticLen[m].setTail(key)
 
 		idx := handlerPtr(len(r.handlers))
 		r.handlers = append(r.handlers, handler)
@@ -88,6 +91,8 @@ func (r *Router[T]) Add(method string, path string, handler T) error {
 	r.handlers = append(r.handlers, handler)
 
 	insert(&r.nodes, r.roots[m], sequence, idx)
+	r.refreshStart(m)
+	refreshSearchTargets(r.nodes)
 
 	return nil
 }
@@ -108,18 +113,18 @@ func (r *Router[T]) Search(method string, path string, params *Params) *T {
 
 	key := staticKey(path)
 
-	if r.staticLen[m].has(len(key)) {
+	if r.staticLen[m].has(len(key)) && r.staticLen[m].hasTail(key) {
 		if idx, ok := r.static[m].get(key); ok {
 			return r.handlerAt(m, idx)
 		}
 	}
 
-	root := r.roots[m]
-	if root < 0 {
+	start := r.starts[m]
+	if start.n < 0 {
 		return nil
 	}
 
-	idx := search(r.nodes, root, path, params)
+	idx := search(r.nodes, start.n, start.idx, path, params)
 	if idx < 0 {
 		params.reset()
 		return nil
@@ -153,6 +158,7 @@ func (r *Router[T]) refreshStaticLenSet(m methodEnum) {
 
 	for i := range r.static[m].entries {
 		r.staticLen[m].set(len(r.static[m].entries[i].key))
+		r.staticLen[m].setTail(r.static[m].entries[i].key)
 	}
 }
 
@@ -185,6 +191,12 @@ func (r *Router[T]) Remove(method string, path string) {
 
 	if remove(r.nodes, r.roots[m], sequence) {
 		r.nodes = compactNodes(r.nodes, &r.roots)
+
+		for mi := range r.roots {
+			r.refreshStart(methodEnum(mi))
+		}
+
+		refreshSearchTargets(r.nodes)
 	}
 }
 
@@ -221,4 +233,27 @@ func (r *Router[T]) removeHandler(m methodEnum, removed handlerPtr) {
 			r.nodes[i].handlerIdx--
 		}
 	}
+}
+
+// searchStart is where a tree search begins. Every path starts with '/', so
+// when the root's only way forward is its '/' child, search starts there and
+// skips a loop pass that could only ever step into it.
+type searchStart struct {
+	n   nodePtr
+	idx int
+}
+
+func (r *Router[T]) refreshStart(m methodEnum) {
+	root := r.roots[m]
+	if root < 0 {
+		r.starts[m] = searchStart{n: -1}
+		return
+	}
+
+	if sc, ok := slashOnlyChild(&r.nodes[root]); ok {
+		r.starts[m] = searchStart{n: sc, idx: 1}
+		return
+	}
+
+	r.starts[m] = searchStart{n: root}
 }

@@ -100,3 +100,45 @@ func TestRouter(t *testing.T) {
 		}
 	}
 }
+
+// Insert refreshes search targets one wildcard at a time. After every Add
+// they must match what a full refreshSearchTargets pass would compute.
+func TestIncrementalSearchTargets(t *testing.T) {
+	type target struct {
+		searchNode nodePtr
+		skip       uint8
+	}
+
+	snapshot := func(nodes []node) []target {
+		var res []target
+		for i := range nodes {
+			for j := range nodes[i].numWildcards() {
+				wc := nodes[i].cold.wildcard[j]
+				res = append(res, target{wc.searchNode, wc.skip})
+			}
+		}
+		return res
+	}
+
+	for name, routes := range map[string][][]string{
+		"github": githubAPI,
+		"parse":  parseAPI,
+		"large":  largeAPI,
+	} {
+		r := New[int]()
+
+		for i, route := range routes {
+			if err := r.Add(route[0], route[1], i); err != nil {
+				t.Fatal(err)
+			}
+
+			got := snapshot(r.nodes)
+			refreshSearchTargets(r.nodes)
+
+			if want := snapshot(r.nodes); !slices.Equal(got, want) {
+				t.Fatalf("%s: stale search targets after adding %s %s",
+					name, route[0], route[1])
+			}
+		}
+	}
+}

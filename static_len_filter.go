@@ -3,15 +3,12 @@ package gohttprouter
 const staticLenBits = 256
 
 type staticLenFilter struct {
-	bits  [staticLenBits / 64]uint64
-	tail  [staticLenBits / 64]uint64
-	long  bool
-	count int32
+	bits [staticLenBits / 64]uint64
+	tail [staticLenBits / 64]uint64
+	long bool
 }
 
 func (s *staticLenFilter) set(n int) {
-	s.count++
-
 	if n >= staticLenBits {
 		s.long = true
 		return

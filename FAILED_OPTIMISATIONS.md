@@ -150,6 +150,10 @@ least as good as what can be written by hand.
 ### Verdict
 Rejected. No source-level change beats the compiler here.
 
+Rechecked on go1.27.1 / amd64 (Ryzen 5 5600X): same lowering, a length
+compare then one inline `CMPW`+`CMPB` (len 3) or `CMPL` (len 4) per case, no
+runtime call. Dropped again without benchmarking.
+
 ---
 
 ## L1 — Flat pointer-free node arena (104 → 32 byte node)
@@ -339,7 +343,26 @@ restructures: the 270ms on the `var stack` line is partly skid, not all real
 zeroing cost.
 
 ### Verdict
-Rejected.
+Rejected on the M2.
+
+### Re-run on amd64 (2026-09-24) — now merged
+Re-tested on a Ryzen 5 5600X, go1.27.1, on top of the incremental
+search-target change. `search` shrank 4293 → 4242 bytes and stayed at the same
+address, so alignment did not skew the comparison. Zeroing dropped from 10 to
+6 `MOVUPS`.
+
+| Bench | Baseline | 16-byte frame |
+|---|---|---|
+| RouterGithub | 30.80 ns | −0.3% |
+| RouterGithubAll | 7.399 µs | −2.1% |
+| RouterGithubParams | 34.20 ns | −1.2% |
+| ParamMissSingle | 15.44 ns | −2.0% |
+| RouterParse | 18.44 ns | +6.5% |
+
+n=1. This is the opposite sign to the M2 run on the hit paths, and it was
+merged as `21408f0`. The M2 regression has not been re-checked against the
+current tree; if it still reproduces there, the change is platform-dependent
+and should be reconsidered.
 
 ---
 
@@ -463,6 +486,218 @@ child lookup inside the existing shape.
 
 ---
 
+## P4 — Gate the static probe on `staticLenFilter.count`
+
+### Idea
+`count` had been added to `staticLenFilter` (d361855, "check before hashing a
+path") but was never read. Wrap the static lookup in `if count > 0` so a
+method with no static routes skips `staticKey`, the filter and the table.
+
+### What happened
+Ryzen 5 5600X, go1.27.1, 6 interleaved rounds against the same build without
+the gate (so `search` sat at the same address in both):
+
+| Bench | Without gate | With gate |
+|---|---|---|
+| RouterGithub | 31.15 ns | +0.87% |
+| RouterGithubAll | 7.430 µs | ~ |
+| RouterParse | 19.09 ns | +3.27% |
+| RouterGithubParams | 35.17 ns | ~ |
+| ParamMissSingle | 15.71 ns | ~ |
+
+### Why it failed
+Every method in every benchmark has at least one static route, so the gate
+never skips anything: it is a pure extra load and branch. The empty-filter
+case it targets already costs one load, because `has(len)` on a zero bitmap
+fails immediately.
+
+### Verdict
+Rejected. `count` was deleted instead (`ebbda26`).
+
+---
+
+## L3 — Separate search tree with contiguous children
+
+### Idea
+A close cousin of L1, aimed at the dependency chain rather than at footprint.
+A read-only search tree (`snode`, 64 bytes) is compiled from the build tree
+breadth first, so every node's children occupy consecutive slots starting at
+`firstKid`, and the children's first bytes are packed into the node
+(`kidBytes`). A descent step becomes node → `firstKid` → child, instead of
+node → `children` slice pointer → `childRef` → child. No `children` slice,
+no `childRef` load.
+
+### Why it looked promising
+The line profile put ~1.2 s of 3.3 s flat in the child step: the
+`nn.children[i]` load (210 ms), the `b != c.b` compare (540 ms) and
+`child := &nodes[cnode]` (500 ms). Unlike L1, this keeps the node at one
+cache line, keeps the prefix inline and removes a hop from the chain instead
+of adding arena indirections.
+
+### What happened
+Ryzen 5 5600X, go1.27.1, n=1 each against `e1450a4`. Corpus diff was
+identical for all three.
+
+| Variant | Github | GithubAll | Parse | GithubParams | ParamMiss | geomean |
+|---|---|---|---|---|---|---|
+| SWAR byte match, 8 inline kids | +17.8% | +16.2% | +22.0% | +13.6% | +24.0% | +18.7% |
+| branchy byte scan, 8 inline kids | +10.8% | +11.7% | +12.7% | +13.0% | +17.2% | +13.1% |
+| branchy byte scan, 16 inline kids | +23.5% | +26.2% | +24.7% | +26.4% | +6.7% | +21.3% |
+
+`perf stat` for the SWAR variant, GithubAll ×150000: instructions +10%,
+L1 loads +2.5%, L1 misses −16%, branches ~, cycles +14%.
+`BuildGithubAPI` 97 µs → 1.4 ms (rebuilt on every Add; not addressed, since
+search already lost).
+
+### Why it failed
+1. **The removed hop was never on the critical path.** The `childRef` scan is
+   branch-predicted, so the CPU issues `children[i]` and the child load
+   speculatively; the chain it actually waits on is shorter than the source
+   suggests. L1 loads went *up*, not down.
+2. **SWAR turns a predicted branch into a data dependency.** xor, sub, andn,
+   tzcnt and shift all sit between the node load and the child load. Same
+   lesson as S1's rank and N5 (c).
+3. **There is little fan-out to win on.** 271 of 375 nodes are leaves, and
+   only one has more than 11 children, so the inline bytes almost never
+   replace a long scan. Growing to 16 inline bytes to cover the wide nodes
+   made it worse.
+
+### Verdict
+Rejected. Kept on branch `compiled-search` (commit message has the numbers).
+
+### Key lesson
+This repeats L1's lesson from a different direction: counting hops in the
+source does not predict the critical path when those hops sit behind a
+well-predicted branch. The N5 lesson ("change the descent's *shape*: fewer
+dependent loads") needs a qualifier: fewer dependent loads *that the branch
+predictor cannot already run ahead of*.
+
+---
+
+## P5 — Stop search short of a trailing slash
+
+### Idea
+The loop head runs `idx >= l || (idx == l-1 && path[idx] == '/')` on every
+pass. Trim one trailing `/` from `l` once at the top of `search`, so the head
+is just `idx >= l`. The catch-all keeps reading to `len(path)` so its value
+still includes the slash. Removes work from the loop without adding a branch,
+the same shape as the per-method search start that did pay off.
+
+### What happened
+Ryzen 5 5600X, go1.27.1, n=1 against `e1450a4`, `search` at the same address
+in both binaries (4242 → 4296 bytes):
+
+| Bench | Baseline | Trimmed |
+|---|---|---|
+| RouterGithub | 30.62 ns | +1.8% |
+| RouterGithubAll | 7.073 µs | +0.9% |
+| RouterParse | 17.38 ns | +0.2% |
+| RouterGithubParams | 33.89 ns | +1.5% |
+| ParamMissSingle | 15.17 ns | −0.2% |
+
+### Why it failed
+No benchmark request ends in `/`, so the second clause was a predicted,
+not-taken compare that cost nothing. The trim adds a load and compare per
+call and grows `search`.
+
+The first version compared `path[idx:]` instead of `path[idx:l]` in the
+missing-slash check. `go test` passed; the corpus diff caught it on
+`/users/x/received_events/`. `TestTrailingSlash` on the branch covers it.
+
+### Verdict
+Rejected. On branch `trim-slash`.
+
+---
+
+## N6 — Two-word compare for 9–17 byte prefixes
+
+### Idea
+61 of 375 tree prefixes are 9–16 bytes and fall through to `memequal`. Add
+`tailWord` (the 8 bytes before the prefix's last byte) and `lastByte` to
+`node`: a full match becomes `prefixWord` + `tailWord` + one byte, and the
+missing-trailing-slash match becomes `prefixWord` + `tailWord`. One field
+serves both hot compares.
+
+### What happened
+`node` was 63 of 64 bytes, so this grows it to 72. To separate that from the
+compare, a control binary had the 72-byte node and the `setPrefix` change but
+the old compares, which put `search` at the same address as the treatment.
+5600X, 2 interleaved rounds:
+
+| Bench | Baseline | Control (72 B node) | Treatment vs control |
+|---|---|---|---|
+| RouterGithub | 30.22 ns | +3.9% | +1.7% |
+| RouterGithubAll | 7.083 µs | +3.9% | +1.2% |
+| RouterParse | 16.93 ns | +7.1% | −3.3% |
+| RouterGithubParams | 34.06 ns | +2.9% | +2.3% |
+| ParamMissSingle | 15.15 ns | +2.7% | −1.9% |
+| geomean | | +4.1% | −0.03% |
+
+### Why it failed
+1. **The compare is a wash on its own.** Treatment vs control is −0.03%
+   geomean with rows split both ways. `memequal` on 9–16 bytes is short, and
+   the call sits behind a predicted branch.
+2. **The node growth costs ~4%**, though the control also moved `search`, so
+   size and alignment are not separated. Either way, packing the node back to
+   64 bytes would not rescue a compare that gains nothing.
+
+A first version lacked the `pLen >= 9` / `rem >= 9` lower bounds, so short
+prefixes on short paths reached the new branch with `tailWord` 0. `go test`
+and the corpus diff both caught it.
+
+### Verdict
+Rejected. On branch `prefix-tailword`.
+
+### Key lesson
+Build a control binary that carries the data-layout change without the code
+change. It is the only way to tell a hot-path change from the layout and
+alignment it drags along, and here it showed the compare was worth nothing.
+
+---
+
+## L4 — Read the first wildcard from `nodeCold.inline`
+
+### Idea
+Per GitHub request: 4.4 descent steps, 0.31 frame pushes, **0 pops**, 1.17
+wildcards tried, 1.74 params set. A wildcard step's chain is
+`nn → cold → wildcard.ptr → searchNode → next node`. Since `nodeCold`
+carries inline storage for the first wildcard, that entry's address is
+`cold + const`, so reading it from `inline[0]` drops `wildcard.ptr` from the
+chain. `inline[0]` is kept as a copy of `wildcard[0]` after a spill.
+
+### What happened
+5600X, 3 interleaved rounds vs `6849932` (search moved 0x160 bytes):
+geomean −1.06%, rows mixed (Github −0.5%, All −1.9%, Random −1.6%, Parse
+−1.7%, Params +0.4%, ParamMiss +0.9%, ManyStatic −3.0%). Instructions/op
+−4 to −6 on every row. A quick hack with `search` at the same address gave
+−0.2% / −2.2% / −1.4% cycles on Github / Params / ParamMiss.
+
+### Verdict
+Not merged: about 1% for an invariant that every wildcard mutation must
+keep. On branch `search-wild0`.
+
+---
+
+## P6 — Keep the param count in a local inside `search`
+
+### Idea
+`params.set` loads `p.idx`, stores the entry and stores `idx+1`, and
+`params.save` loads it again, so consecutive sets chain through
+store-to-load forwarding. Track it in a local and write it back on a match.
+
+### What happened
+`search` at the same address: instructions/op +39 Github, +46 Params, +17
+ParamMiss, +16 Parse; cycles/op +8.3%, +2.5%, +6.3%, +6.1%.
+
+### Why it failed
+The local is live across the whole `goto` web and gets spilled and
+reloaded around it. Same register-pressure failure as L1's hoisted arenas.
+
+### Verdict
+Rejected. On branch `search-local-pidx`.
+
+---
+
 ## Summary
 
 | Change | Result | Reason |
@@ -477,9 +712,15 @@ child lookup inside the existing shape.
 | Sorted-children early `break` in search scan | ~0% hits, +2.7% ParamMissSingle (regression) | fans are small (2-8); extra compare per element costs more than early exit saves |
 | Single-load descent head (goto step / hoisted byte / nested-if, 3 variants) | +2 to +6% (regression, all variants) | profile blamed the duplicate `path[idx]` load on lines 427+440 (3.45s), but the cost is loop-head branch + node cache misses skidding onto nearby loads; the second load is L1-hot and free, while every restructure worsened branch layout |
 | P1 PGO build (`-pgo`, mixed + clean profiles) | +2.6 to +5.7% on hits (regression), −5 to −7% on miss | PGO layout perturbs the hand-tuned descent loop; hit path loses |
-| P2 16-byte `searchFrame` (int32 fields, halve stack zeroing) | +2.1 to +2.7% (regression) | int↔int32 conversions on push/pop hot sites cost more than 64B less zeroing; `var stack` line was partly skid |
+| P2 16-byte `searchFrame` (int32 fields, halve stack zeroing) | +2.1 to +2.7% on M2 (regression); −0.3 to −2.1% hits on 5600X, **merged** (`21408f0`) | int↔int32 conversions on push/pop hot sites cost more than 64B less zeroing; `var stack` line was partly skid |
 | N5 `[256]int16` dispatch table on fan-out nodes (>= 8 children) | −1.0 to −1.9% hits, +4.8% miss, +40% build | table wins ~6% where present, but the `flagHasTable` branch in the descent head costs ~5% on every table-less path |
 | P3 tree-only search (static routes into tree, map deleted) | +1.8% params, +4.9% static, +137% RouterLarge (regression, all benches) | static routes inflate fan-out on the prefixes param paths descend; map probe saved less than the bigger tree costs; hybrid split is load-bearing |
+| P4 gate static probe on `staticLenFilter.count` | +0.9% Github, +3.3% Parse, rest ~ | every benchmarked method has a static route, so the gate never fires; `count` deleted instead |
+| P5 stop search short of a trailing slash | +0.2 to +1.8% (regression) | the removed clause was a predicted not-taken compare; trim adds work per call |
+| N6 two-word compare for 9–17 byte prefixes (72 B node) | −0.03% vs control; +4% with node growth | `memequal` on these lengths is already cheap; node growth costs ~4% |
+| L4 first wildcard read from `nodeCold.inline` | −1.06% geomean, rows mixed | removes one dependent load, but needs a mirror invariant; not merged |
+| P6 param count in a local inside `search` | +2.5 to +8.3% cycles, +16 to +46 instructions | local spilled across the goto web |
+| L3 separate search tree, contiguous children, inline child bytes (3 variants) | +13 to +21% geomean (regression, all benches), 14× build | removed hop sat behind a predicted branch; SWAR adds a data dependency; fan-out mostly 0–3 |
 
 Successful optimisations (for contrast):
 
@@ -504,6 +745,64 @@ Successful optimisations (for contrast):
   `/`, with no new branch in the loop. All −5.9%, Random −5.6%, Params
   −5.0%, Parse −2.4%, Github and ParamMissSingle ~. Parallel was noise
   (+6.8% then −6.0% interleaved).
+
+The following were measured on a Ryzen 5 5600X, go1.27.1:
+
+- **Incremental search-target refresh** (`ebbda26`) — `Add` recomputed every
+  wildcard's `searchNode` across the whole arena (`refreshSearchTargets` was
+  37% of `BuildGithubAPI`). Insert now refreshes only the wildcard it descends
+  through; the full pass stays for `Remove`, where `compactNodes` renumbers.
+  `BuildGithubAPI` 157 → 88 µs, `BuildParseAPI` 7.1 → 5.9 µs. No search
+  change: `search` is byte-identical.
+- **16-byte `searchFrame`** (`21408f0`) — see P2's amd64 re-run.
+- **Static table length buckets** (`e1450a4`) — `off[n]` holds the first
+  entry of length ≥ n for keys under 256 bytes, replacing the length bitmap
+  and the `lowerBound` binary search with two loads from one line. Longer
+  keys still binary search from `off[256]`. Caps static routes at 65535 per
+  method. Back to back against the previous `main`: Github −1.1%, All −3.8%,
+  Parse −13.0%, Params +1.4%, ParamMissSingle −0.6%, geomean −3.6%.
+
+- **Static keys ≤ 16 bytes by first and last word** (`0da95a8`, branch
+  `static-lastword`) — static entries also keep the key's last 8 bytes, so a
+  first-word match on a key up to 16 bytes is exact without `memequal`.
+  Covers 36 of githubAPI's 39 static routes; entries grow 32 → 40 bytes.
+  Static-hits-only scratch benchmark, two rounds: 11.20/11.37 → 9.18/9.17 ns
+  (−19%). On the mixed benchmarks it dilutes to ~1% (39 of 203 routes are
+  static), below single-run noise.
+- **Binary search large static buckets** (`75e021d`, branch
+  `static-bsearch`) — a length bucket was scanned linearly, so 2000 static
+  routes of one length (`/pages/p-0000`…) cost ~884 ns per lookup; githubAPI
+  never has more than 4 per length, so no benchmark showed it. Buckets are
+  sorted by (first word, last word, key) and buckets over 8 entries are
+  binary searched. `BenchmarkRouterManyStatic` 884 → 44 ns; GitHub rows
+  within ±2%. A first version made `bucket` exact for ≥256-byte keys, which
+  pushed it past the inline budget and cost ~12 instructions on every
+  `Search`; check `-gcflags=-m=2` for `bucket` after touching it.
+- **Build allocations** (`6849932`, branch `build-allocs`) — segment slice
+  in a stack buffer passed to `splitPathInto`, param names interned once in
+  `Add` and passed to `insert`, first wildcard stored inline in `nodeCold`,
+  `normalizeStaticPath` slicing instead of concatenating, static inserts by
+  binary search with incremental offsets. BuildGithubAPI 95.7 → 74.8 µs,
+  1091 → 501 allocs; BuildManyStatic 7.89 → 0.78 ms. Search instructions/op
+  unchanged.
+
+### Measurement notes (5600X)
+
+- **Code alignment moves results by ~6%.** A change that left `search`
+  byte-identical but moved it from `0x6d8700` to `0x6d88e0` made Parse ~6%
+  and Params ~3% slower, repeatably. Before blaming a change outside the
+  search path, compare `go tool nm -size <bin>.test | grep 'router\.search$'`
+  across the two binaries.
+- **New test functions move `search` too.** Tests compile into the same
+  binary, and adding one shifted every later symbol by 0x240. Build the
+  benchmark binary without new test code, or add it to both sides.
+- **Two identical binaries can differ by 14%** on GithubAll in a noisy run.
+  Compare against a same-code control when a result is surprising.
+- **Anchor `-test.bench` patterns.** `ManyStatic$` also matches
+  `BuildManyStatic`, and with `-test.benchtime 30000000x` that is hours of
+  builds. Use `^Benchmark(Name)$`.
+- Check `ps` for background load before trusting a run: concurrent `rustc`
+  and `snapperd` produced 2× outliers.
 
 ### Remaining profile costs (all structural, no cheap lever found)
 

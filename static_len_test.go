@@ -1,64 +1,43 @@
 package gohttprouter
 
 import (
-	"slices"
 	"strconv"
 	"strings"
 	"testing"
 )
 
-func TestStaticLenHashFalseNegatives(t *testing.T) {
-	var s staticLenFilter
+func TestStaticBuckets(t *testing.T) {
+	var st staticTable
 
-	registered := []int{0, 1, 63, 64, 255, 256, 257, 300, 1000, 1 << 16}
-	for _, n := range registered {
-		s.set(n)
+	registered := []int{1, 2, 63, 64, 254, 255, 256, 257, 300, 1000, 1 << 16}
+	for i, n := range registered {
+		st.set("/"+strings.Repeat("a", n-1), handlerPtr(i))
 	}
 
-	for _, n := range registered {
-		if !s.has(n) {
-			t.Errorf("has(%d) = false, want true (false negative!)", n)
+	for i, n := range registered {
+		key := "/" + strings.Repeat("a", n-1)
+
+		lo, hi := st.bucket(n)
+		if lo >= hi {
+			t.Fatalf("bucket(%d) is empty (false negative)", n)
+		}
+
+		if idx, ok := st.scan(key, lo, hi); !ok || idx != handlerPtr(i) {
+			t.Errorf("scan(len %d) = %d, %v, want %d", n, idx, ok, i)
 		}
 	}
 
-	var huge staticLenFilter
-	for _, n := range []int{1 << 20, 1 << 30, int(1 << 40)} {
-		huge.set(n)
-		if !huge.has(n) {
-			t.Errorf("has(%d) = false, want true", n)
-		}
-	}
-}
+	for _, n := range []int{3, 62, 65, 253, 258, 999, 1 << 17} {
+		lo, hi := st.bucket(n)
+		key := "/" + strings.Repeat("a", n-1)
 
-func TestStaticLenHashFalsePositiveRate(t *testing.T) {
-	registered := []int{5, 6, 7, 9, 10, 11, 12, 13, 14, 15, 19, 20}
-
-	var s staticLenFilter
-
-	for _, n := range registered {
-		s.set(n)
-	}
-
-	const maxFPRate = 0.10
-	probes := 0
-	total := 0
-
-	for n := range 1 << 14 {
-		if slices.Contains(registered, n) {
-			continue
+		if _, ok := st.scan(key, lo, hi); ok {
+			t.Errorf("scan(len %d) found a key that was never set", n)
 		}
 
-		total++
-		if s.has(n) {
-			probes++
+		if n < staticLenBits && lo < hi {
+			t.Errorf("bucket(%d) = [%d, %d), want empty", n, lo, hi)
 		}
-	}
-
-	rate := float64(probes) / float64(total)
-	t.Log("fp rate", rate)
-
-	if rate > maxFPRate {
-		t.Errorf("false positive rate %.4f > %.2f", rate, maxFPRate)
 	}
 }
 
@@ -103,8 +82,8 @@ func TestStaticLenMixedLengths(t *testing.T) {
 	}
 
 	for _, n := range []int{1, 255, 301} {
-		if !r.staticLen[methodGet].has(n) {
-			t.Errorf("staticLen.has(%d) = false, want true", n)
+		if lo, hi := r.static[methodGet].bucket(n); lo >= hi {
+			t.Errorf("bucket(%d) is empty, want a route", n)
 		}
 	}
 }
@@ -137,8 +116,8 @@ func TestStaticLenRemoveRebuilds(t *testing.T) {
 	xs := []string{paths[0], paths[2]}
 
 	for _, p := range xs {
-		if !r.staticLen[methodGet].has(len(p)) {
-			t.Errorf("rebuilt set lost surviving length %d", len(p))
+		if lo, hi := r.static[methodGet].bucket(len(p)); lo >= hi {
+			t.Errorf("rebuilt buckets lost surviving length %d", len(p))
 		}
 	}
 }

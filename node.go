@@ -855,7 +855,7 @@ func insert(
 
 		newChild := &(*nodes)[newChildIdx]
 		setPrefix(newChild, closest.prefix[:best])
-		newChild.flags = closest.flags & flagHasParams
+		newChild.flags |= closest.flags & flagHasParams
 		setPrefix(closest, closest.prefix[best:])
 		newChild.appendChild(oldChildIdx, closest.prefix[0])
 

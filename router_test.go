@@ -198,3 +198,27 @@ func TestWildcardInlineSpill(t *testing.T) {
 	check("/a/3/d", 2, "z", "3")
 	check("/a/4/e", 3, "w", "4")
 }
+
+// Splitting a node whose prefix ends in '/' must keep the new parent's
+// flagPrefixEndsSlash, or a path without its trailing slash misses.
+func TestSplitKeepsTrailingSlashMatch(t *testing.T) {
+	r := New[int]()
+	if err := r.Add("GET", "/a/:x/b/c/:y", 1); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.Add("GET", "/a/:x/b", 2); err != nil {
+		t.Fatal(err)
+	}
+
+	params := Params{}
+
+	for path, want := range map[string]int{
+		"/a/1/b":     2,
+		"/a/1/b/":    2,
+		"/a/1/b/c/2": 1,
+	} {
+		if h := r.Search("GET", path, &params); h == nil || *h != want {
+			t.Fatalf("Search(%q) = %v, want %d", path, h, want)
+		}
+	}
+}
